@@ -201,52 +201,34 @@ export function computeNoticesVersion(list: Notice[] = DEFAULT_NOTICES): string 
   return `v_${Math.abs(hash)}`;
 }
 
-// Retrieve notices from local cache with smart deployment invalidation
+// Retrieve notices from local storage cache, preserving any user modifications
 export function getStoredNotices(): Notice[] {
   if (typeof window === 'undefined') return DEFAULT_NOTICES;
   
-  const currentCodeVersion = computeNoticesVersion(DEFAULT_NOTICES);
-  const storedVersion = localStorage.getItem('lohas_notices_version');
   const cachedJson = localStorage.getItem('lohas_cache_notices');
-
-  // If a new build was deployed (version mismatch) or no cache exists:
-  if (!cachedJson || storedVersion !== currentCodeVersion) {
-    let mergedList = [...DEFAULT_NOTICES];
-    if (cachedJson) {
-      try {
-        const parsed = JSON.parse(cachedJson) as Notice[];
-        // Preserve any custom notices added by the user
-        const customNotices = parsed.filter(p => !DEFAULT_NOTICES.some(d => d.id === p.id));
-        if (customNotices.length > 0) {
-          mergedList = [...customNotices, ...DEFAULT_NOTICES];
-        }
-      } catch {
-        mergedList = [...DEFAULT_NOTICES];
-      }
-    }
-    // Update local cache to match newly deployed version
+  if (cachedJson) {
     try {
-      localStorage.setItem('lohas_cache_notices', JSON.stringify(mergedList));
-      localStorage.setItem('lohas_notices_version', currentCodeVersion);
-    } catch {}
-    return mergedList;
+      const parsed = JSON.parse(cachedJson) as Notice[];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    } catch (e) {
+      console.warn('Failed to parse cached notices:', e);
+    }
   }
 
+  // If no cache exists, initialize with DEFAULT_NOTICES
   try {
-    const parsed = JSON.parse(cachedJson) as Notice[];
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_NOTICES;
-  } catch {
-    return DEFAULT_NOTICES;
-  }
+    localStorage.setItem('lohas_cache_notices', JSON.stringify(DEFAULT_NOTICES));
+  } catch {}
+  return DEFAULT_NOTICES;
 }
 
 // Save notices to local cache and notify active UI components
 export function saveNoticesToCache(notices: Notice[]) {
   if (typeof window === 'undefined') return;
   try {
-    const currentCodeVersion = computeNoticesVersion(DEFAULT_NOTICES);
     localStorage.setItem('lohas_cache_notices', JSON.stringify(notices));
-    localStorage.setItem('lohas_notices_version', currentCodeVersion);
     window.dispatchEvent(new CustomEvent('lohas_notices_updated', { detail: notices }));
   } catch (err) {
     console.warn('Failed to save notices to cache:', err);
@@ -410,8 +392,7 @@ export async function seedDatabaseIfNeeded() {
       }
     }
 
-    // 6. Check Notices Collection & keep deployment in sync
-    const currentCodeVersion = computeNoticesVersion(DEFAULT_NOTICES);
+    // 6. Check Notices Collection (seed only if empty)
     try {
       const noticesRef = collection(db, 'notices');
       const noticesSnap = await getDocs(noticesRef);
@@ -423,19 +404,6 @@ export async function seedDatabaseIfNeeded() {
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp()
           });
-        }
-      } else {
-        // If code notices version updated in new deployment, sync default notices to Firestore
-        const lastSyncedVersion = localStorage.getItem('lohas_firestore_synced_version');
-        if (lastSyncedVersion !== currentCodeVersion) {
-          for (const notice of DEFAULT_NOTICES) {
-            const { id, createdAt, updatedAt, ...cleanNotice } = notice;
-            await setDoc(doc(db, 'notices', id), {
-              ...cleanNotice,
-              updatedAt: serverTimestamp()
-            }, { merge: true });
-          }
-          try { localStorage.setItem('lohas_firestore_synced_version', currentCodeVersion); } catch {}
         }
       }
     } catch (e) {
@@ -705,8 +673,10 @@ export async function createNotice(notice: Omit<Notice, 'id' | 'createdAt' | 'up
 // Update Notice (immediately updates local cache and persists to Firestore with setDoc merge)
 export async function updateNotice(id: string, notice: Partial<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>): Promise<Notice[]> {
   const currentList = getStoredNotices();
+  let found = false;
   const updatedList = currentList.map(n => {
     if (n.id === id) {
+      found = true;
       return {
         ...n,
         ...notice,
@@ -715,6 +685,21 @@ export async function updateNotice(id: string, notice: Partial<Omit<Notice, 'id'
     }
     return n;
   });
+
+  if (!found) {
+    updatedList.unshift({
+      id,
+      title: notice.title || '공지사항',
+      content: notice.content || '',
+      category: notice.category || '양성화안내',
+      published: notice.published !== false,
+      isPinned: !!notice.isPinned,
+      imageUrl: notice.imageUrl || '',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...notice
+    } as Notice);
+  }
 
   saveNoticesToCache(updatedList);
 

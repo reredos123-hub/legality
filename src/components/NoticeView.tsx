@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Calendar, ChevronLeft, ChevronRight, X, Image as ImageIcon, BookOpen, Trash2, Settings } from 'lucide-react';
+import { Search, Calendar, ChevronLeft, ChevronRight, X, Image as ImageIcon, BookOpen, Trash2, Settings, Edit2 } from 'lucide-react';
 import { Notice, DesignSettings } from '../types';
 
 interface NoticeViewProps {
@@ -8,9 +8,10 @@ interface NoticeViewProps {
   adminUser?: any;
   onDeleteNotice?: (id: string) => Promise<void>;
   onGoToAdmin?: () => void;
+  onEditNotice?: (notice: Notice) => void;
 }
 
-export default function NoticeView({ notices, designSettings, adminUser, onDeleteNotice, onGoToAdmin }: NoticeViewProps) {
+export default function NoticeView({ notices, designSettings, adminUser, onDeleteNotice, onGoToAdmin, onEditNotice }: NoticeViewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedNotice, setSelectedNotice] = useState<Notice | null>(null);
   const isAdmin = !!adminUser || (typeof window !== 'undefined' && localStorage.getItem('lohas_admin_session') === 'true');
@@ -139,7 +140,21 @@ export default function NoticeView({ notices, designSettings, adminUser, onDelet
 
                 <div className="p-5 sm:p-6 pt-0 border-t border-white/10 flex items-center justify-between text-xs sm:text-sm font-bold text-[#FFD700]">
                   <span className="hover:text-amber-200 transition-colors">상세보기</span>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-1.5">
+                    {isAdmin && onEditNotice && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditNotice(notice);
+                        }}
+                        className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black rounded text-xs font-semibold border border-amber-500/30 transition-colors cursor-pointer flex items-center space-x-1"
+                        title="공지사항 수정"
+                      >
+                        <Edit2 size={12} />
+                        <span>수정</span>
+                      </button>
+                    )}
                     {isAdmin && onDeleteNotice && (
                       <button
                         type="button"
@@ -257,7 +272,21 @@ export default function NoticeView({ notices, designSettings, adminUser, onDelet
 
             {/* Modal Footer */}
             <div className="p-6 border-t border-white/10 flex items-center justify-between">
-              <div>
+              <div className="flex items-center space-x-2">
+                {isAdmin && onEditNotice && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const noticeToEdit = selectedNotice;
+                      setSelectedNotice(null);
+                      onEditNotice(noticeToEdit);
+                    }}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black rounded-full text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 shadow"
+                  >
+                    <Edit2 size={14} />
+                    <span>이 공지 수정하기</span>
+                  </button>
+                )}
                 {isAdmin && onDeleteNotice && (
                   <button
                     type="button"

@@ -82,6 +82,8 @@ export default function App() {
   });
 
   const [notices, setNotices] = useState<Notice[]>(() => getStoredNotices());
+  const [adminInitialTab, setAdminInitialTab] = useState<'stats' | 'notices' | 'pages' | 'design' | 'seo' | 'media'>('stats');
+  const [adminInitialNoticeId, setAdminInitialNoticeId] = useState<string | null>(null);
 
   // Listen for notice updates from anywhere in the app
   useEffect(() => {
@@ -712,7 +714,21 @@ export default function App() {
               }
             }
           }}
-          onGoToAdmin={() => setView('admin')}
+          onGoToAdmin={() => {
+            setAdminInitialTab('notices');
+            setAdminInitialNoticeId(null);
+            setView('admin');
+          }}
+          onEditNotice={(notice) => {
+            const isLoggedAdmin = !!adminUser || (typeof window !== 'undefined' && localStorage.getItem('lohas_admin_session') === 'true');
+            if (!isLoggedAdmin) {
+              setShowLoginModal(true);
+              return;
+            }
+            setAdminInitialTab('notices');
+            setAdminInitialNoticeId(notice.id);
+            setView('admin');
+          }}
         />
       )}
 
@@ -721,6 +737,8 @@ export default function App() {
           adminEmail={adminUser.email || ''} 
           onLogout={handleLogout} 
           onRefreshData={initApp}
+          initialTab={adminInitialTab}
+          initialNoticeIdToEdit={adminInitialNoticeId}
         />
       )}
 

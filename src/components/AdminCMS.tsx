@@ -27,7 +27,8 @@ import {
   Paperclip,
   X,
   Copy,
-  Check
+  Check,
+  FileCode
 } from 'lucide-react';
 import { 
   Notice, 
@@ -54,7 +55,8 @@ import {
   deleteMediaItem,
   resetVisitorStats,
   DEFAULT_NOTICES,
-  saveNoticesToCache
+  saveNoticesToCache,
+  getStoredNotices
 } from '../lib/db-service';
 
 // Helper function to process and compress local image file to data URL
@@ -104,10 +106,12 @@ interface AdminCMSProps {
   adminEmail: string;
   onLogout: () => void;
   onRefreshData: () => void;
+  initialTab?: 'stats' | 'notices' | 'pages' | 'design' | 'seo' | 'media';
+  initialNoticeIdToEdit?: string | null;
 }
 
-export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminCMSProps) {
-  const [activeTab, setActiveTab] = useState<'stats' | 'notices' | 'pages' | 'design' | 'seo' | 'media'>('stats');
+export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialTab, initialNoticeIdToEdit }: AdminCMSProps) {
+  const [activeTab, setActiveTab] = useState<'stats' | 'notices' | 'pages' | 'design' | 'seo' | 'media'>(initialTab || 'stats');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -151,6 +155,9 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
   const [editingNotice, setEditingNotice] = useState<Notice | null>(null);
   const [isCreatingNotice, setIsCreatingNotice] = useState(false);
   const [copiedNoticeCode, setCopiedNoticeCode] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importJsonText, setImportJsonText] = useState('');
+  const [importError, setImportError] = useState('');
   const [noticeForm, setNoticeForm] = useState<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>({
     title: '',
     content: '',
@@ -210,6 +217,22 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
       const nt = await fetchNotices();
       setNotices(nt);
 
+      if (initialNoticeIdToEdit) {
+        const found = nt.find(n => n.id === initialNoticeIdToEdit);
+        if (found) {
+          setActiveTab('notices');
+          setEditingNotice(found);
+          setNoticeForm({
+            title: found.title,
+            content: found.content,
+            published: found.published,
+            isPinned: !!found.isPinned,
+            imageUrl: found.imageUrl || ''
+          });
+          setIsCreatingNotice(true);
+        }
+      }
+
       // Load media
       const md = await fetchMediaItems();
       setMediaItems(md);
@@ -220,8 +243,14 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
   };
 
   useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
     loadCMSData();
-  }, []);
+  }, [initialNoticeIdToEdit]);
 
   const triggerSuccessAlert = () => {
     setSaveSuccess(true);
@@ -349,7 +378,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
         updatedList = await updateNotice(editingNotice.id, noticeForm);
       } else {
         await createNotice(noticeForm);
-        updatedList = await fetchNotices();
+        updatedList = getStoredNotices();
       }
       // Reset form
       setIsCreatingNotice(false);
@@ -357,6 +386,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
       setNoticeForm({
         title: '',
         content: '',
+        category: '양성화안내',
         published: true,
         isPinned: false,
         imageUrl: ''
@@ -367,7 +397,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
       onRefreshData();
     } catch (err: any) {
       console.warn('Notice submit warning:', err);
-      const nt = await fetchNotices();
+      const nt = getStoredNotices();
       setNotices(nt);
       triggerSuccessAlert();
       onRefreshData();
@@ -381,6 +411,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
     setNoticeForm({
       title: notice.title,
       content: notice.content,
+      category: notice.category || '양성화안내',
       published: notice.published,
       isPinned: !!notice.isPinned,
       imageUrl: notice.imageUrl || ''
@@ -399,6 +430,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
         setNoticeForm({
           title: '',
           content: '',
+          category: '양성화안내',
           published: true,
           isPinned: false,
           imageUrl: ''
@@ -410,7 +442,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
       alert('공지사항이 성공적으로 삭제되었습니다.');
     } catch (err: any) {
       console.warn('Failed to delete notice:', err);
-      const nt = await fetchNotices();
+      const nt = getStoredNotices();
       setNotices(nt);
     } finally {
       setIsSaving(false);
@@ -427,6 +459,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
         await updateNotice(notice.id, {
           title: notice.title,
           content: notice.content,
+          category: notice.category,
           published: notice.published,
           isPinned: notice.isPinned,
           imageUrl: notice.imageUrl
@@ -447,6 +480,50 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
     navigator.clipboard.writeText(codeStr);
     setCopiedNoticeCode(true);
     setTimeout(() => setCopiedNoticeCode(false), 3000);
+  };
+
+  const handleOpenImportModal = () => {
+    setImportJsonText(JSON.stringify(notices, null, 2));
+    setImportError('');
+    setIsImportModalOpen(true);
+  };
+
+  const handleApplyImportJson = async () => {
+    try {
+      setImportError('');
+      const parsed = JSON.parse(importJsonText);
+      if (!Array.isArray(parsed)) {
+        throw new Error('데이터는 배열 형식이어야 합니다. (예: [ { "id": "...", "title": "..." } ])');
+      }
+      for (const item of parsed) {
+        if (!item.id || !item.title) {
+          throw new Error('각 공지사항 항목은 "id"와 "title" 필드를 반드시 포함해야 합니다.');
+        }
+      }
+      setIsSaving(true);
+      saveNoticesToCache(parsed);
+      setNotices(parsed);
+      setIsImportModalOpen(false);
+      triggerSuccessAlert();
+      onRefreshData();
+      alert('공지사항 데이터가 성공적으로 업데이트되었습니다.');
+
+      // Background sync
+      for (const notice of parsed) {
+        await updateNotice(notice.id, {
+          title: notice.title,
+          content: notice.content || '',
+          category: notice.category || '양성화안내',
+          published: notice.published !== false,
+          isPinned: !!notice.isPinned,
+          imageUrl: notice.imageUrl || ''
+        });
+      }
+    } catch (err: any) {
+      setImportError(err?.message || '올바른 JSON 형식이 아닙니다.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // ----------------------------------------
@@ -1087,6 +1164,16 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
 
                         <button
                           type="button"
+                          onClick={handleOpenImportModal}
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-700"
+                          title="JSON 데이터 직접 편집 또는 붙여넣어 즉시 업데이트"
+                        >
+                          <FileCode size={14} className="text-amber-400" />
+                          <span>JSON 데이터 가져오기 / 일괄 수정</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={handleResetToDefaultNotices}
                           className="px-3.5 py-2 bg-slate-900 hover:bg-rose-950/30 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
                           title="초기 기본 공지사항으로 되돌리기"
@@ -1170,6 +1257,76 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
                       )}
                     </div>
 
+                  </div>
+                )}
+
+                {/* JSON Data Import & Bulk Edit Modal */}
+                {isImportModalOpen && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                    <div className="bg-slate-900 border border-slate-700 w-full max-w-3xl rounded-2xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+                        <div className="flex items-center space-x-2">
+                          <FileCode className="text-amber-400" size={20} />
+                          <h3 className="text-lg font-bold text-white">공지사항 JSON 데이터 직접 편집 / 가져오기</h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsImportModalOpen(false)}
+                          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+
+                      <p className="text-slate-400 text-xs sm:text-sm mb-3">
+                        현재 등록된 모든 공지사항 데이터가 표시됩니다. 내용을 직접 수정하거나 준비된 JSON 배열 데이터를 붙여넣은 후 <strong>[적용 및 즉시 저장]</strong>을 누르면 즉시 웹사이트 전체에 영구 반영됩니다.
+                      </p>
+
+                      {importError && (
+                        <div className="mb-3 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 font-semibold">
+                          {importError}
+                        </div>
+                      )}
+
+                      <textarea
+                        value={importJsonText}
+                        onChange={(e) => {
+                          setImportJsonText(e.target.value);
+                          setImportError('');
+                        }}
+                        className="flex-1 w-full min-h-[320px] bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-xs text-emerald-400 focus:outline-none focus:border-amber-500/50 resize-y"
+                        spellCheck={false}
+                      />
+
+                      <div className="flex items-center justify-between border-t border-slate-800 pt-4 mt-4">
+                        <button
+                          type="button"
+                          onClick={() => setImportJsonText(JSON.stringify(DEFAULT_NOTICES, null, 2))}
+                          className="text-xs text-slate-400 hover:text-slate-200 underline cursor-pointer"
+                        >
+                          기본 데이터 양식 불러오기
+                        </button>
+
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsImportModalOpen(false)}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                          >
+                            닫기
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={handleApplyImportJson}
+                            className="px-5 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-black text-xs font-bold rounded-xl transition-colors cursor-pointer shadow flex items-center space-x-1.5"
+                          >
+                            <Save size={14} />
+                            <span>{isSaving ? '저장 및 배포 중...' : '적용 및 즉시 저장'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
 
