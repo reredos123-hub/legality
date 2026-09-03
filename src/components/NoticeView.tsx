@@ -1,20 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Calendar, ChevronLeft, ChevronRight, X, Image as ImageIcon, BookOpen, Trash2, Settings, Edit2 } from 'lucide-react';
+import { Search, Calendar, ChevronLeft, ChevronRight, X, Image as ImageIcon, BookOpen } from 'lucide-react';
 import { Notice, DesignSettings } from '../types';
 
 interface NoticeViewProps {
   notices: Notice[];
   designSettings: DesignSettings;
-  adminUser?: any;
-  onDeleteNotice?: (id: string) => Promise<void>;
-  onGoToAdmin?: () => void;
-  onEditNotice?: (notice: Notice) => void;
 }
 
-export default function NoticeView({ notices, designSettings, adminUser, onDeleteNotice, onGoToAdmin, onEditNotice }: NoticeViewProps) {
+export default function NoticeView({ notices, designSettings }: NoticeViewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedNotice, setSelectedNotice] = useState<Notice | null>(null);
-  const isAdmin = !!adminUser || (typeof window !== 'undefined' && localStorage.getItem('lohas_admin_session') === 'true');
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -140,37 +135,7 @@ export default function NoticeView({ notices, designSettings, adminUser, onDelet
 
                 <div className="p-5 sm:p-6 pt-0 border-t border-white/10 flex items-center justify-between text-xs sm:text-sm font-bold text-[#FFD700]">
                   <span className="hover:text-amber-200 transition-colors">상세보기</span>
-                  <div className="flex items-center space-x-1.5">
-                    {isAdmin && onEditNotice && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onEditNotice(notice);
-                        }}
-                        className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black rounded text-xs font-semibold border border-amber-500/30 transition-colors cursor-pointer flex items-center space-x-1"
-                        title="공지사항 수정"
-                      >
-                        <Edit2 size={12} />
-                        <span>수정</span>
-                      </button>
-                    )}
-                    {isAdmin && onDeleteNotice && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onDeleteNotice(notice.id);
-                        }}
-                        className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded text-xs font-semibold border border-rose-500/30 transition-colors cursor-pointer flex items-center space-x-1"
-                        title="공지사항 삭제"
-                      >
-                        <Trash2 size={12} />
-                        <span>삭제</span>
-                      </button>
-                    )}
-                    <ChevronRight size={16} />
-                  </div>
+                  <ChevronRight size={16} />
                 </div>
               </article>
             ))}
@@ -271,37 +236,9 @@ export default function NoticeView({ notices, designSettings, adminUser, onDelet
             </div>
 
             {/* Modal Footer */}
-            <div className="p-6 border-t border-white/10 flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                {isAdmin && onEditNotice && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const noticeToEdit = selectedNotice;
-                      setSelectedNotice(null);
-                      onEditNotice(noticeToEdit);
-                    }}
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black rounded-full text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 shadow"
-                  >
-                    <Edit2 size={14} />
-                    <span>이 공지 수정하기</span>
-                  </button>
-                )}
-                {isAdmin && onDeleteNotice && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDeleteNotice(selectedNotice.id);
-                      setSelectedNotice(null);
-                    }}
-                    className="px-4 py-2 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-full text-xs font-bold border border-rose-500/30 transition-colors cursor-pointer flex items-center space-x-1.5"
-                  >
-                    <Trash2 size={14} />
-                    <span>이 공지 삭제</span>
-                  </button>
-                )}
-              </div>
+            <div className="p-6 border-t border-white/10 flex items-center justify-end">
               <button
+                type="button"
                 onClick={() => setSelectedNotice(null)}
                 className="px-6 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-full text-sm transition-colors cursor-pointer border border-white/15"
               >

@@ -40,7 +40,6 @@ import {
   fetchSEOSettings, 
   fetchNotices, 
   fetchPageContent,
-  deleteNotice,
   getStoredNotices,
   DEFAULT_DESIGN,
   DEFAULT_SEO,
@@ -695,40 +694,6 @@ export default function App() {
         <NoticeView 
           notices={notices} 
           designSettings={design} 
-          adminUser={adminUser}
-          onDeleteNotice={async (id: string) => {
-            const isLoggedAdmin = !!adminUser || (typeof window !== 'undefined' && localStorage.getItem('lohas_admin_session') === 'true');
-            if (!isLoggedAdmin) {
-              alert('관리자로 로그인한 경우에만 공지사항을 삭제할 수 있습니다.');
-              return;
-            }
-            if (window.confirm('정말 이 공지사항을 삭제하시겠습니까?')) {
-              try {
-                const updatedList = await deleteNotice(id);
-                setNotices(updatedList);
-                alert('공지사항이 성공적으로 삭제되었습니다.');
-              } catch (err: any) {
-                alert('삭제 중 오류가 발생했습니다: ' + (err?.message || err));
-                const updatedList = await fetchNotices();
-                setNotices(updatedList);
-              }
-            }
-          }}
-          onGoToAdmin={() => {
-            setAdminInitialTab('notices');
-            setAdminInitialNoticeId(null);
-            setView('admin');
-          }}
-          onEditNotice={(notice) => {
-            const isLoggedAdmin = !!adminUser || (typeof window !== 'undefined' && localStorage.getItem('lohas_admin_session') === 'true');
-            if (!isLoggedAdmin) {
-              setShowLoginModal(true);
-              return;
-            }
-            setAdminInitialTab('notices');
-            setAdminInitialNoticeId(notice.id);
-            setView('admin');
-          }}
         />
       )}
 
