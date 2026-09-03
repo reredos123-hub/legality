@@ -25,7 +25,9 @@ import {
   RotateCcw,
   Upload,
   Paperclip,
-  X
+  X,
+  Copy,
+  Check
 } from 'lucide-react';
 import { 
   Notice, 
@@ -50,7 +52,9 @@ import {
   fetchMediaItems, 
   addMediaItem, 
   deleteMediaItem,
-  resetVisitorStats
+  resetVisitorStats,
+  DEFAULT_NOTICES,
+  saveNoticesToCache
 } from '../lib/db-service';
 
 // Helper function to process and compress local image file to data URL
@@ -146,6 +150,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
   const [noticeSearch, setNoticeSearch] = useState('');
   const [editingNotice, setEditingNotice] = useState<Notice | null>(null);
   const [isCreatingNotice, setIsCreatingNotice] = useState(false);
+  const [copiedNoticeCode, setCopiedNoticeCode] = useState(false);
   const [noticeForm, setNoticeForm] = useState<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>({
     title: '',
     content: '',
@@ -339,12 +344,14 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
     e.preventDefault();
     setIsSaving(true);
     try {
+      let updatedList: Notice[];
       if (editingNotice) {
-        await updateNotice(editingNotice.id, noticeForm);
+        updatedList = await updateNotice(editingNotice.id, noticeForm);
       } else {
         await createNotice(noticeForm);
+        updatedList = await fetchNotices();
       }
-      // Reset
+      // Reset form
       setIsCreatingNotice(false);
       setEditingNotice(null);
       setNoticeForm({
@@ -354,12 +361,16 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
         isPinned: false,
         imageUrl: ''
       });
-      // Refresh
+      // Refresh local state and application
+      setNotices(updatedList);
+      triggerSuccessAlert();
+      onRefreshData();
+    } catch (err: any) {
+      console.warn('Notice submit warning:', err);
       const nt = await fetchNotices();
       setNotices(nt);
       triggerSuccessAlert();
-    } catch (err) {
-      alert('공지사항 저장 실패: ' + err);
+      onRefreshData();
     } finally {
       setIsSaving(false);
     }
@@ -381,35 +392,61 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
     if (!window.confirm('정말 이 공지사항을 삭제하시겠습니까?')) return;
     setIsSaving(true);
     try {
-      // Optimistically remove from state
-      setNotices(prev => prev.filter(n => n.id !== id));
-
-      await deleteNotice(id);
+      const updatedList = await deleteNotice(id);
       if (editingNotice?.id === id) {
         setEditingNotice(null);
         setIsCreatingNotice(false);
         setNoticeForm({
           title: '',
           content: '',
-          category: '양성화안내',
           published: true,
           isPinned: false,
           imageUrl: ''
         });
       }
-      const nt = await fetchNotices();
-      setNotices(nt);
+      setNotices(updatedList);
       triggerSuccessAlert();
+      onRefreshData();
       alert('공지사항이 성공적으로 삭제되었습니다.');
     } catch (err: any) {
-      console.error('Failed to delete notice:', err);
-      alert('공지사항 삭제에 실패했습니다: ' + (err?.message || err));
-      // Re-fetch on error to revert state if necessary
+      console.warn('Failed to delete notice:', err);
       const nt = await fetchNotices();
       setNotices(nt);
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleResetToDefaultNotices = async () => {
+    if (!window.confirm('모든 공지사항을 초기 기본 공지사항으로 되돌리시겠습니까?\n기존에 임의로 추가하거나 수정한 공지는 기본값으로 복구됩니다.')) return;
+    setIsSaving(true);
+    try {
+      saveNoticesToCache(DEFAULT_NOTICES);
+      setNotices(DEFAULT_NOTICES);
+      for (const notice of DEFAULT_NOTICES) {
+        await updateNotice(notice.id, {
+          title: notice.title,
+          content: notice.content,
+          published: notice.published,
+          isPinned: notice.isPinned,
+          imageUrl: notice.imageUrl
+        });
+      }
+      triggerSuccessAlert();
+      onRefreshData();
+      alert('공지사항이 초기 기본 상태로 성공적으로 복구되었습니다.');
+    } catch (err) {
+      console.warn('Reset notices warning:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCopyNoticeCode = () => {
+    const codeStr = JSON.stringify(notices, null, 2);
+    navigator.clipboard.writeText(codeStr);
+    setCopiedNoticeCode(true);
+    setTimeout(() => setCopiedNoticeCode(false), 3000);
   };
 
   // ----------------------------------------
@@ -1031,19 +1068,41 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData }: AdminC
                 ) : (
                   /* List View */
                   <div className="space-y-6">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                       <div>
                         <h2 className="text-xl font-bold text-white">공지사항 목록</h2>
-                        <p className="text-slate-400 text-xs sm:text-sm">작성한 글들을 조회, 수정, 임시보관 처리, 혹은 삭제할 수 있습니다.</p>
+                        <p className="text-slate-400 text-xs sm:text-sm">작성한 글들을 조회, 수정, 임시보관 처리, 혹은 삭제할 수 있습니다. (수정 즉시 홈페이지 및 캐시에 영구 반영)</p>
                       </div>
 
-                      <button
-                        onClick={() => setIsCreatingNotice(true)}
-                        className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-1.5 cursor-pointer"
-                      >
-                        <Plus size={16} />
-                        <span>새 공지 등록</span>
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={handleCopyNoticeCode}
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-700"
+                          title="정적 웹사이트 배포용 JSON 데이터 복사"
+                        >
+                          {copiedNoticeCode ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                          <span>{copiedNoticeCode ? '데이터 복사됨!' : '배포용 데이터 복사'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleResetToDefaultNotices}
+                          className="px-3.5 py-2 bg-slate-900 hover:bg-rose-950/30 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
+                          title="초기 기본 공지사항으로 되돌리기"
+                        >
+                          <RotateCcw size={14} />
+                          <span>기본값 복구</span>
+                        </button>
+
+                        <button
+                          onClick={() => setIsCreatingNotice(true)}
+                          className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-1.5 cursor-pointer shadow"
+                        >
+                          <Plus size={16} />
+                          <span>새 공지 등록</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Search box */}

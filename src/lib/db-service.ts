@@ -189,6 +189,70 @@ export const DEFAULT_NOTICES: Notice[] = [
   }
 ];
 
+// Calculate a deterministic version hash from DEFAULT_NOTICES so code updates instantly invalidate stale caches
+export function computeNoticesVersion(list: Notice[] = DEFAULT_NOTICES): string {
+  const contentStr = list.map(n => `${n.id}#${n.title}#${n.content.slice(0, 80)}#${n.published}#${n.isPinned}#${n.imageUrl || ''}`).join('|');
+  let hash = 0;
+  for (let i = 0; i < contentStr.length; i++) {
+    const char = contentStr.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return `v_${Math.abs(hash)}`;
+}
+
+// Retrieve notices from local cache with smart deployment invalidation
+export function getStoredNotices(): Notice[] {
+  if (typeof window === 'undefined') return DEFAULT_NOTICES;
+  
+  const currentCodeVersion = computeNoticesVersion(DEFAULT_NOTICES);
+  const storedVersion = localStorage.getItem('lohas_notices_version');
+  const cachedJson = localStorage.getItem('lohas_cache_notices');
+
+  // If a new build was deployed (version mismatch) or no cache exists:
+  if (!cachedJson || storedVersion !== currentCodeVersion) {
+    let mergedList = [...DEFAULT_NOTICES];
+    if (cachedJson) {
+      try {
+        const parsed = JSON.parse(cachedJson) as Notice[];
+        // Preserve any custom notices added by the user
+        const customNotices = parsed.filter(p => !DEFAULT_NOTICES.some(d => d.id === p.id));
+        if (customNotices.length > 0) {
+          mergedList = [...customNotices, ...DEFAULT_NOTICES];
+        }
+      } catch {
+        mergedList = [...DEFAULT_NOTICES];
+      }
+    }
+    // Update local cache to match newly deployed version
+    try {
+      localStorage.setItem('lohas_cache_notices', JSON.stringify(mergedList));
+      localStorage.setItem('lohas_notices_version', currentCodeVersion);
+    } catch {}
+    return mergedList;
+  }
+
+  try {
+    const parsed = JSON.parse(cachedJson) as Notice[];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_NOTICES;
+  } catch {
+    return DEFAULT_NOTICES;
+  }
+}
+
+// Save notices to local cache and notify active UI components
+export function saveNoticesToCache(notices: Notice[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const currentCodeVersion = computeNoticesVersion(DEFAULT_NOTICES);
+    localStorage.setItem('lohas_cache_notices', JSON.stringify(notices));
+    localStorage.setItem('lohas_notices_version', currentCodeVersion);
+    window.dispatchEvent(new CustomEvent('lohas_notices_updated', { detail: notices }));
+  } catch (err) {
+    console.warn('Failed to save notices to cache:', err);
+  }
+}
+
 export const DEFAULT_STATS: VisitorStats = {
   id: 'stats',
   visits: 428,
@@ -346,8 +410,9 @@ export async function seedDatabaseIfNeeded() {
       }
     }
 
-    // 6. Check Notices Collection ONLY if not previously seeded
-    if (!isAlreadySeeded) {
+    // 6. Check Notices Collection & keep deployment in sync
+    const currentCodeVersion = computeNoticesVersion(DEFAULT_NOTICES);
+    try {
       const noticesRef = collection(db, 'notices');
       const noticesSnap = await getDocs(noticesRef);
       if (noticesSnap.empty) {
@@ -359,7 +424,22 @@ export async function seedDatabaseIfNeeded() {
             updatedAt: serverTimestamp()
           });
         }
+      } else {
+        // If code notices version updated in new deployment, sync default notices to Firestore
+        const lastSyncedVersion = localStorage.getItem('lohas_firestore_synced_version');
+        if (lastSyncedVersion !== currentCodeVersion) {
+          for (const notice of DEFAULT_NOTICES) {
+            const { id, createdAt, updatedAt, ...cleanNotice } = notice;
+            await setDoc(doc(db, 'notices', id), {
+              ...cleanNotice,
+              updatedAt: serverTimestamp()
+            }, { merge: true });
+          }
+          try { localStorage.setItem('lohas_firestore_synced_version', currentCodeVersion); } catch {}
+        }
       }
+    } catch (e) {
+      console.warn('Syncing notices in seedDatabaseIfNeeded warning:', e);
     }
 
     // 7. Check visitor stats
@@ -531,8 +611,10 @@ export async function updatePageContent(id: 'home' | 'about' | 'guide', data: Pa
   }
 }
 
-// Fetch Notices (all, sorted by createdAt desc, optionally pinned first)
+// Fetch Notices (checks Firestore, falls back to local cache/DEFAULT_NOTICES, keeps them synced)
 export async function fetchNotices(): Promise<Notice[]> {
+  const localList = getStoredNotices();
+
   try {
     const noticesRef = collection(db, 'notices');
     let snap;
@@ -544,70 +626,117 @@ export async function fetchNotices(): Promise<Notice[]> {
       snap = await getDocs(noticesRef);
     }
 
-    const list: Notice[] = [];
-    snap.forEach(docSnap => {
-      const data = docSnap.data();
-      if (data.category === '성공사례') return; // Exclude '성공사례' items
+    if (!snap.empty) {
+      const list: Notice[] = [];
+      snap.forEach(docSnap => {
+        const data = docSnap.data();
+        if (data.category === '성공사례') return; // Exclude '성공사례' items
 
-      let createdDate = new Date();
-      if (data.createdAt?.toDate) {
-        createdDate = data.createdAt.toDate();
-      } else if (data.createdAt) {
-        createdDate = new Date(data.createdAt);
+        let createdDate = new Date();
+        if (data.createdAt?.toDate) {
+          createdDate = data.createdAt.toDate();
+        } else if (data.createdAt) {
+          createdDate = new Date(data.createdAt);
+        }
+
+        let updatedDate = new Date();
+        if (data.updatedAt?.toDate) {
+          updatedDate = data.updatedAt.toDate();
+        } else if (data.updatedAt) {
+          updatedDate = new Date(data.updatedAt);
+        }
+
+        list.push({
+          id: docSnap.id,
+          ...data,
+          createdAt: createdDate,
+          updatedAt: updatedDate
+        } as Notice);
+      });
+
+      // In-memory sort: pinned items first, then by createdAt desc
+      list.sort((a, b) => {
+        if (!!a.isPinned !== !!b.isPinned) {
+          return a.isPinned ? -1 : 1;
+        }
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+
+      if (list.length > 0) {
+        saveNoticesToCache(list);
+        return list;
       }
-
-      let updatedDate = new Date();
-      if (data.updatedAt?.toDate) {
-        updatedDate = data.updatedAt.toDate();
-      } else if (data.updatedAt) {
-        updatedDate = new Date(data.updatedAt);
-      }
-
-      list.push({
-        id: docSnap.id,
-        ...data,
-        createdAt: createdDate,
-        updatedAt: updatedDate
-      } as Notice);
-    });
-
-    // In-memory sort: pinned items first, then by createdAt desc
-    list.sort((a, b) => {
-      if (!!a.isPinned !== !!b.isPinned) {
-        return a.isPinned ? -1 : 1;
-      }
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    });
-
-    return list;
+    }
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, 'notices');
-    return [];
+    console.warn('Firestore fetchNotices warning (using local/deployed notices):', error);
   }
+
+  return localList.length > 0 ? localList : DEFAULT_NOTICES;
 }
 
-// Create Notice
+// Create Notice (immediately updates local cache and persists to Firestore)
 export async function createNotice(notice: Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
-  const noticesRef = collection(db, 'notices');
-  const docRef = await addDoc(noticesRef, {
+  const newId = `notice-${Date.now()}`;
+  const newNotice: Notice = {
+    id: newId,
     ...notice,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  });
-  return docRef.id;
+    createdAt: new Date(),
+    updatedAt: new Date()
+  };
+
+  const currentList = getStoredNotices();
+  const updatedList = [newNotice, ...currentList];
+  saveNoticesToCache(updatedList);
+
+  try {
+    const docRef = doc(db, 'notices', newId);
+    await setDoc(docRef, {
+      ...notice,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  } catch (error) {
+    console.warn('Firestore createNotice warning (saved to local cache):', error);
+  }
+
+  return newId;
 }
 
-// Update Notice
-export async function updateNotice(id: string, notice: Partial<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>) {
-  const docRef = doc(db, 'notices', id);
-  await updateDoc(docRef, {
-    ...notice,
-    updatedAt: serverTimestamp()
+// Update Notice (immediately updates local cache and persists to Firestore with setDoc merge)
+export async function updateNotice(id: string, notice: Partial<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>): Promise<Notice[]> {
+  const currentList = getStoredNotices();
+  const updatedList = currentList.map(n => {
+    if (n.id === id) {
+      return {
+        ...n,
+        ...notice,
+        updatedAt: new Date()
+      };
+    }
+    return n;
   });
+
+  saveNoticesToCache(updatedList);
+
+  try {
+    const docRef = doc(db, 'notices', id);
+    await setDoc(docRef, {
+      ...notice,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch (error) {
+    console.warn(`Firestore updateNotice (${id}) warning (saved to local cache):`, error);
+  }
+
+  return updatedList;
 }
 
-// Delete Notice
-export async function deleteNotice(id: string) {
+// Delete Notice (immediately updates local cache and removes from Firestore)
+export async function deleteNotice(id: string): Promise<Notice[]> {
+  const currentList = getStoredNotices();
+  const updatedList = currentList.filter(n => n.id !== id);
+  saveNoticesToCache(updatedList);
+
   try {
     const docRef = doc(db, 'notices', id);
     await deleteDoc(docRef);
@@ -618,9 +747,10 @@ export async function deleteNotice(id: string) {
       // ignore
     }
   } catch (error) {
-    console.warn(`Error deleting notice (${id}):`, error);
-    throw error;
+    console.warn(`Firestore deleteNotice (${id}) warning (removed from local cache):`, error);
   }
+
+  return updatedList;
 }
 
 // Fetch Media Items

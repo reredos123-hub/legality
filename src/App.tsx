@@ -41,6 +41,7 @@ import {
   fetchNotices, 
   fetchPageContent,
   deleteNotice,
+  getStoredNotices,
   DEFAULT_DESIGN,
   DEFAULT_SEO,
   DEFAULT_HOME,
@@ -80,14 +81,18 @@ export default function App() {
     }
   });
 
-  const [notices, setNotices] = useState<Notice[]>(() => {
-    try {
-      const cached = localStorage.getItem('lohas_cache_notices');
-      return cached ? JSON.parse(cached) : DEFAULT_NOTICES;
-    } catch {
-      return DEFAULT_NOTICES;
-    }
-  });
+  const [notices, setNotices] = useState<Notice[]>(() => getStoredNotices());
+
+  // Listen for notice updates from anywhere in the app
+  useEffect(() => {
+    const handleNoticesUpdate = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) {
+        setNotices(e.detail);
+      }
+    };
+    window.addEventListener('lohas_notices_updated', handleNoticesUpdate);
+    return () => window.removeEventListener('lohas_notices_updated', handleNoticesUpdate);
+  }, []);
 
   const [homeContent, setHomeContent] = useState<PageContent>(() => {
     try {
@@ -697,9 +702,7 @@ export default function App() {
             }
             if (window.confirm('정말 이 공지사항을 삭제하시겠습니까?')) {
               try {
-                setNotices(prev => prev.filter(n => n.id !== id));
-                await deleteNotice(id);
-                const updatedList = await fetchNotices();
+                const updatedList = await deleteNotice(id);
                 setNotices(updatedList);
                 alert('공지사항이 성공적으로 삭제되었습니다.');
               } catch (err: any) {
