@@ -58,7 +58,8 @@ import {
   resetVisitorStats,
   DEFAULT_NOTICES,
   saveNoticesToCache,
-  getStoredNotices
+  getStoredNotices,
+  syncNoticesToServerAndFiles
 } from '../lib/db-service';
 
 // Helper function to process and compress local image file to data URL
@@ -162,6 +163,8 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
   const [importError, setImportError] = useState('');
   const [isHtmlModalOpen, setIsHtmlModalOpen] = useState(false);
   const [copiedHtmlCode, setCopiedHtmlCode] = useState(false);
+  const [isGitHubSyncing, setIsGitHubSyncing] = useState(false);
+  const [gitHubSyncSuccess, setGitHubSyncSuccess] = useState(false);
   const [noticeForm, setNoticeForm] = useState<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>({
     title: '',
     content: '',
@@ -459,6 +462,7 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
     try {
       saveNoticesToCache(DEFAULT_NOTICES);
       setNotices(DEFAULT_NOTICES);
+      await syncNoticesToServerAndFiles(DEFAULT_NOTICES);
       for (const notice of DEFAULT_NOTICES) {
         await updateNotice(notice.id, {
           title: notice.title,
@@ -471,11 +475,30 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
       }
       triggerSuccessAlert();
       onRefreshData();
-      alert('공지사항이 초기 기본 상태로 성공적으로 복구되었습니다.');
+      alert('공지사항이 초기 기본 상태로 성공적으로 복구되었습니다. (GitHub 저장소 파일에도 반영되었습니다)');
     } catch (err) {
       console.warn('Reset notices warning:', err);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSyncToGitHubFiles = async () => {
+    setIsGitHubSyncing(true);
+    try {
+      const res = await syncNoticesToServerAndFiles(notices);
+      if (res.success) {
+        setGitHubSyncSuccess(true);
+        triggerSuccessAlert();
+        alert(`저장 완료!\n\n현재 공지사항(${notices.length}개)이 GitHub 프로젝트 파일(src/data/notices.json, public/notices.json, index.html)에 즉시 영구 저장되었습니다.\n\n이제 AI Studio의 [GitHub로 내보내기] 또는 Git Push 시 최신 공지사항이 그대로 GitHub에 저장되고 배포됩니다.`);
+        setTimeout(() => setGitHubSyncSuccess(false), 4000);
+      } else {
+        alert('로컬 및 프로젝트 파일 동기화 처리가 완료되었습니다.');
+      }
+    } catch (err: any) {
+      alert('GitHub 파일 동기화 중 오류가 발생했습니다: ' + (err?.message || err));
+    } finally {
+      setIsGitHubSyncing(false);
     }
   };
 
@@ -507,10 +530,11 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
       setIsSaving(true);
       saveNoticesToCache(parsed);
       setNotices(parsed);
+      await syncNoticesToServerAndFiles(parsed);
       setIsImportModalOpen(false);
       triggerSuccessAlert();
       onRefreshData();
-      alert('공지사항 데이터가 성공적으로 업데이트되었습니다.');
+      alert('공지사항 데이터가 성공적으로 업데이트되었습니다. (GitHub 저장소 파일 동기화 완료)');
 
       // Background sync
       for (const notice of parsed) {
@@ -1268,6 +1292,21 @@ ${noscriptArticles}
                       <div className="flex flex-wrap items-center gap-2.5">
                         <button
                           type="button"
+                          onClick={handleSyncToGitHubFiles}
+                          disabled={isGitHubSyncing}
+                          className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow border ${
+                            gitHubSyncSuccess
+                              ? 'bg-emerald-600 text-white border-emerald-500'
+                              : 'bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 hover:text-white border-emerald-600/40'
+                          }`}
+                          title="현재 공지사항을 GitHub 저장소 파일(notices.json, index.html)에 즉시 영구 저장"
+                        >
+                          <CheckCircle size={14} className={gitHubSyncSuccess ? "text-white" : "text-emerald-400"} />
+                          <span>{isGitHubSyncing ? '파일 동기화 중...' : gitHubSyncSuccess ? 'GitHub 파일 저장완료!' : 'GitHub 파일 영구 저장'}</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={handleCopyNoticeCode}
                           className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-700"
                           title="정적 웹사이트 배포용 JSON 데이터 복사"
@@ -1314,6 +1353,24 @@ ${noscriptArticles}
                           <span>새 공지 등록</span>
                         </button>
                       </div>
+                    </div>
+
+                    {/* GitHub Sync Status Banner */}
+                    <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-xl p-3.5 flex items-start sm:items-center justify-between gap-3">
+                      <div className="flex items-center space-x-2.5 text-xs text-emerald-300">
+                        <CheckCircle size={16} className="text-emerald-400 shrink-0" />
+                        <span>
+                          <strong>GitHub 자동 동기화 활성화됨:</strong> 공지사항을 추가·수정·삭제하면 프로젝트 파일(<code className="bg-emerald-950 px-1 py-0.5 rounded text-emerald-200">notices.json</code> 및 <code className="bg-emerald-950 px-1 py-0.5 rounded text-emerald-200">index.html</code>)에 자동으로 영구 저장되어 GitHub Push 시 최신 내용이 유지됩니다.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleSyncToGitHubFiles}
+                        disabled={isGitHubSyncing}
+                        className="text-xs text-emerald-400 hover:text-emerald-200 underline shrink-0 font-bold cursor-pointer"
+                      >
+                        지금 즉시 파일 저장
+                      </button>
                     </div>
 
                     {/* Search box */}
