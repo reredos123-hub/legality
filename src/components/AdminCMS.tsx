@@ -28,7 +28,9 @@ import {
   X,
   Copy,
   Check,
-  FileCode
+  FileCode,
+  Code,
+  Download
 } from 'lucide-react';
 import { 
   Notice, 
@@ -158,6 +160,8 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [importJsonText, setImportJsonText] = useState('');
   const [importError, setImportError] = useState('');
+  const [isHtmlModalOpen, setIsHtmlModalOpen] = useState(false);
+  const [copiedHtmlCode, setCopiedHtmlCode] = useState(false);
   const [noticeForm, setNoticeForm] = useState<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>({
     title: '',
     content: '',
@@ -524,6 +528,116 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const generateCompleteIndexHtml = (noticeList: Notice[]) => {
+    const jsonLdItems = noticeList.map((n, idx) => ({
+      "@type": "ListItem",
+      "position": idx + 1,
+      "item": {
+        "@type": "NewsArticle",
+        "headline": n.title,
+        "description": n.content ? n.content.slice(0, 150).replace(/\n/g, ' ') : '',
+        "articleSection": n.category || '양성화안내',
+        "datePublished": n.createdAt ? (typeof n.createdAt === 'string' ? n.createdAt : new Date(n.createdAt).toISOString().split('T')[0]) : '2026-07-15',
+        "author": {
+          "@type": "Person",
+          "name": "김용호 대표 건축사"
+        }
+      }
+    }));
+
+    const noscriptArticles = noticeList.map(n => `            <article>
+              <h3>[${n.category || '양성화안내'}] ${n.title}</h3>
+              <p>${n.content ? n.content.slice(0, 200).replace(/\n/g, ' ') : ''}...</p>
+            </article>`).join('\n');
+
+    return `<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>로하스건축사사무소 - 위반건축물 양성화 전문</title>
+    <meta name="description" content="위반건축물 양성화, 불법건축물 양성화, 특정건축물 정리 특별조치법 전문 로하스건축사사무소. 김용호 건축사 직접 상담." />
+    <meta property="og:title" content="로하스건축사사무소 - 위반건축물 양성화 전문" />
+    <meta property="og:description" content="위반건축물 양성화, 불법건축물 양성화, 특정건축물 정리 특별조치법 전문 로하스건축사사무소. 김용호 건축사 직접 상담." />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ko_KR" />
+    <link rel="preconnect" href="https://images.unsplash.com" crossorigin />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+
+    <!-- Notice Data in HTML (Schema.org JSON-LD for SEO Crawlers) -->
+    <script type="application/ld+json">
+${JSON.stringify({
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "LocalBusiness",
+      "name": "로하스건축사사무소",
+      "description": "위반건축물 양성화, 불법건축물 양성화, 특정건축물 정리 특별조치법 전문 건축사사무소",
+      "telephone": "02-499-0229",
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "서울시 송파구 송이로14길 8, 301호",
+        "addressLocality": "서울시 송파구",
+        "addressCountry": "KR"
+      }
+    },
+    {
+      "@type": "ItemList",
+      "name": "로하스건축사사무소 공지사항 및 양성화 안내",
+      "itemListElement": jsonLdItems
+    }
+  ]
+}, null, 2)}
+    </script>
+
+    <!-- Embedded Notices Data in HTML -->
+    <script id="initial-notices" type="application/json">
+${JSON.stringify(noticeList, null, 2)}
+    </script>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Static SEO & Semantic Fallback Content for Crawlers & Readers -->
+      <noscript>
+        <header>
+          <h1>로하스건축사사무소 - 위반건축물 양성화 전문</h1>
+          <p>전국 위반건축물 합법화(양성화), 특정건축물 정리에 관한 특별조치법, 추인 허가/신고 전문 (대표 김용호 건축사 직통: 02-499-0229)</p>
+        </header>
+        <main>
+          <section>
+            <h2>공지사항 및 양성화 안내</h2>
+${noscriptArticles}
+          </section>
+        </main>
+      </noscript>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`;
+  };
+
+  const handleDownloadHtml = () => {
+    const htmlContent = generateCompleteIndexHtml(notices);
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'index.html';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleCopyCompleteHtml = () => {
+    const htmlContent = generateCompleteIndexHtml(notices);
+    navigator.clipboard.writeText(htmlContent);
+    setCopiedHtmlCode(true);
+    setTimeout(() => setCopiedHtmlCode(false), 3000);
   };
 
   // ----------------------------------------
@@ -1174,6 +1288,16 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
 
                         <button
                           type="button"
+                          onClick={() => setIsHtmlModalOpen(true)}
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-cyan-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-cyan-500/30"
+                          title="현재 공지사항이 포함된 HTML 소스코드 생성 및 다운로드"
+                        >
+                          <Code size={14} className="text-cyan-400" />
+                          <span>HTML 코드 내보내기 / 다운로드</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={handleResetToDefaultNotices}
                           className="px-3.5 py-2 bg-slate-900 hover:bg-rose-950/30 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
                           title="초기 기본 공지사항으로 되돌리기"
@@ -1323,6 +1447,70 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
                           >
                             <Save size={14} />
                             <span>{isSaving ? '저장 및 배포 중...' : '적용 및 즉시 저장'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* HTML Export / View Modal */}
+                {isHtmlModalOpen && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                    <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-2xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-4 mb-4">
+                        <div className="flex items-center space-x-2">
+                          <Code className="text-cyan-400" size={20} />
+                          <h3 className="text-lg font-bold text-white">공지사항이 포함된 HTML (index.html) 코드</h3>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsHtmlModalOpen(false)}
+                          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+
+                      <p className="text-slate-400 text-xs sm:text-sm mb-3">
+                        현재 관리자에서 수정한 모든 공지사항 데이터가 Schema.org 검색엔진 구조화 데이터, JSON 스크립트, 그리고 SEO 폴백(Fallback) 본문으로 완전히 삽입된 <strong>index.html</strong> 소스코드입니다.
+                      </p>
+
+                      <textarea
+                        readOnly
+                        value={generateCompleteIndexHtml(notices)}
+                        className="flex-1 w-full min-h-[340px] bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-xs text-cyan-300 focus:outline-none resize-y"
+                        spellCheck={false}
+                      />
+
+                      <div className="flex items-center justify-between border-t border-slate-800 pt-4 mt-4">
+                        <span className="text-xs text-slate-400">
+                          총 {notices.length}개의 공지사항이 HTML에 완벽히 동기화되어 있습니다.
+                        </span>
+
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => setIsHtmlModalOpen(false)}
+                            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+                          >
+                            닫기
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCopyCompleteHtml}
+                            className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow flex items-center space-x-1.5"
+                          >
+                            {copiedHtmlCode ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                            <span>{copiedHtmlCode ? 'HTML 복사완료!' : 'HTML 전체 복사'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleDownloadHtml}
+                            className="px-5 py-2 bg-cyan-500 hover:bg-cyan-400 text-black text-xs font-bold rounded-xl transition-colors cursor-pointer shadow flex items-center space-x-1.5"
+                          >
+                            <Download size={14} />
+                            <span>index.html 파일 다운로드</span>
                           </button>
                         </div>
                       </div>

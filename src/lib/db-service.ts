@@ -201,10 +201,29 @@ export function computeNoticesVersion(list: Notice[] = DEFAULT_NOTICES): string 
   return `v_${Math.abs(hash)}`;
 }
 
+// Extract initial pre-embedded notices directly from index.html if available
+export function getNoticesFromHtmlDocument(): Notice[] | null {
+  if (typeof document === 'undefined') return null;
+  try {
+    const el = document.getElementById('initial-notices');
+    if (el && el.textContent) {
+      const parsed = JSON.parse(el.textContent);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn('Could not parse notices from HTML script tag:', e);
+  }
+  return null;
+}
+
 // Retrieve notices from local storage cache, preserving any user modifications
 export function getStoredNotices(): Notice[] {
   if (typeof window === 'undefined') return DEFAULT_NOTICES;
   
+  const htmlNotices = getNoticesFromHtmlDocument();
+
   const cachedJson = localStorage.getItem('lohas_cache_notices');
   if (cachedJson) {
     try {
@@ -217,11 +236,13 @@ export function getStoredNotices(): Notice[] {
     }
   }
 
-  // If no cache exists, initialize with DEFAULT_NOTICES
+  const initialList = htmlNotices && htmlNotices.length > 0 ? htmlNotices : DEFAULT_NOTICES;
+
+  // If no cache exists, initialize with HTML or DEFAULT_NOTICES
   try {
-    localStorage.setItem('lohas_cache_notices', JSON.stringify(DEFAULT_NOTICES));
+    localStorage.setItem('lohas_cache_notices', JSON.stringify(initialList));
   } catch {}
-  return DEFAULT_NOTICES;
+  return initialList;
 }
 
 // Save notices to local cache and notify active UI components
