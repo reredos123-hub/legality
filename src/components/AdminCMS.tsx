@@ -30,7 +30,10 @@ import {
   Check,
   FileCode,
   Code,
-  Download
+  Download,
+  Pin,
+  Calendar,
+  RotateCw
 } from 'lucide-react';
 import { 
   Notice, 
@@ -59,7 +62,9 @@ import {
   DEFAULT_NOTICES,
   saveNoticesToCache,
   getStoredNotices,
-  syncNoticesToServerAndFiles
+  syncNoticesToServerAndFiles,
+  resetAllNotices,
+  clearAllNotices
 } from '../lib/db-service';
 
 // Helper function to process and compress local image file to data URL
@@ -165,13 +170,26 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
   const [copiedHtmlCode, setCopiedHtmlCode] = useState(false);
   const [isGitHubSyncing, setIsGitHubSyncing] = useState(false);
   const [gitHubSyncSuccess, setGitHubSyncSuccess] = useState(false);
-  const [noticeForm, setNoticeForm] = useState<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>({
+  const [noticeForm, setNoticeForm] = useState<{
+    title: string;
+    content: string;
+    category: string;
+    published: boolean;
+    isPinned: boolean;
+    imageUrl: string;
+    createdAtDate: string;
+  }>({
     title: '',
     content: '',
+    category: '양성화안내',
     published: true,
     isPinned: false,
-    imageUrl: ''
+    imageUrl: '',
+    createdAtDate: ''
   });
+  const [customCategory, setCustomCategory] = useState('');
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [previewNoticeMode, setPreviewNoticeMode] = useState(false);
 
   // Media states
   const mediaFileInputRef = useRef<HTMLInputElement>(null);
@@ -229,13 +247,28 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
         if (found) {
           setActiveTab('notices');
           setEditingNotice(found);
+          const cat = found.category || '양성화안내';
+          const standardCats = ['양성화안내', '소식', '건축법령', '자주묻는질문', '보도자료'];
+          const isStd = standardCats.includes(cat);
+          let dateStr = '';
+          if (found.createdAt) {
+            const d = new Date(found.createdAt);
+            if (!isNaN(d.getTime())) {
+              dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            }
+          }
           setNoticeForm({
             title: found.title,
             content: found.content,
-            published: found.published,
+            category: isStd ? cat : '직접입력',
+            published: found.published !== false,
             isPinned: !!found.isPinned,
-            imageUrl: found.imageUrl || ''
+            imageUrl: found.imageUrl || '',
+            createdAtDate: dateStr
           });
+          setIsCustomCategory(!isStd);
+          setCustomCategory(isStd ? '' : cat);
+          setPreviewNoticeMode(false);
           setIsCreatingNotice(true);
         }
       }
@@ -376,28 +409,73 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
     }
   };
 
+  const handleStartCreateNotice = () => {
+    setEditingNotice(null);
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    setNoticeForm({
+      title: '',
+      content: '',
+      category: '양성화안내',
+      published: true,
+      isPinned: false,
+      imageUrl: '',
+      createdAtDate: dateStr
+    });
+    setIsCustomCategory(false);
+    setCustomCategory('');
+    setPreviewNoticeMode(false);
+    setIsCreatingNotice(true);
+  };
+
   const handleNoticeSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
+      const chosenCategory = isCustomCategory ? (customCategory.trim() || '양성화안내') : noticeForm.category;
+      
+      let finalCreatedAt: Date | undefined = undefined;
+      if (noticeForm.createdAtDate) {
+        const parsedD = new Date(noticeForm.createdAtDate);
+        if (!isNaN(parsedD.getTime())) {
+          finalCreatedAt = parsedD;
+        }
+      }
+
+      const noticePayload = {
+        title: noticeForm.title.trim(),
+        content: noticeForm.content.trim(),
+        category: chosenCategory,
+        published: noticeForm.published,
+        isPinned: noticeForm.isPinned,
+        imageUrl: noticeForm.imageUrl,
+        createdAt: finalCreatedAt
+      };
+
       let updatedList: Notice[];
       if (editingNotice) {
-        updatedList = await updateNotice(editingNotice.id, noticeForm);
+        updatedList = await updateNotice(editingNotice.id, noticePayload);
       } else {
-        await createNotice(noticeForm);
+        await createNotice(noticePayload);
         updatedList = getStoredNotices();
       }
-      // Reset form
+
+      // Reset form state
       setIsCreatingNotice(false);
       setEditingNotice(null);
+      setPreviewNoticeMode(false);
       setNoticeForm({
         title: '',
         content: '',
         category: '양성화안내',
         published: true,
         isPinned: false,
-        imageUrl: ''
+        imageUrl: '',
+        createdAtDate: ''
       });
+      setIsCustomCategory(false);
+      setCustomCategory('');
+
       // Refresh local state and application
       setNotices(updatedList);
       triggerSuccessAlert();
@@ -415,15 +493,53 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
 
   const handleEditNotice = (notice: Notice) => {
     setEditingNotice(notice);
+    const cat = notice.category || '양성화안내';
+    const standardCats = ['양성화안내', '소식', '건축법령', '자주묻는질문', '보도자료'];
+    const isStd = standardCats.includes(cat);
+
+    let dateStr = '';
+    if (notice.createdAt) {
+      const d = new Date(notice.createdAt);
+      if (!isNaN(d.getTime())) {
+        dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+    }
+
     setNoticeForm({
       title: notice.title,
       content: notice.content,
-      category: notice.category || '양성화안내',
-      published: notice.published,
+      category: isStd ? cat : '직접입력',
+      published: notice.published !== false,
       isPinned: !!notice.isPinned,
-      imageUrl: notice.imageUrl || ''
+      imageUrl: notice.imageUrl || '',
+      createdAtDate: dateStr
     });
+    setIsCustomCategory(!isStd);
+    setCustomCategory(isStd ? '' : cat);
+    setPreviewNoticeMode(false);
     setIsCreatingNotice(true);
+  };
+
+  const handleToggleNoticePin = async (notice: Notice) => {
+    try {
+      const updatedList = await updateNotice(notice.id, { isPinned: !notice.isPinned });
+      setNotices(updatedList);
+      triggerSuccessAlert();
+      onRefreshData();
+    } catch (err) {
+      console.warn('Toggle notice pin error:', err);
+    }
+  };
+
+  const handleToggleNoticePublish = async (notice: Notice) => {
+    try {
+      const updatedList = await updateNotice(notice.id, { published: !notice.published });
+      setNotices(updatedList);
+      triggerSuccessAlert();
+      onRefreshData();
+    } catch (err) {
+      console.warn('Toggle notice publish error:', err);
+    }
   };
 
   const handleDeleteNoticeClick = async (id: string) => {
@@ -440,7 +556,8 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
           category: '양성화안내',
           published: true,
           isPinned: false,
-          imageUrl: ''
+          imageUrl: '',
+          createdAtDate: ''
         });
       }
       setNotices(updatedList);
@@ -457,27 +574,32 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
   };
 
   const handleResetToDefaultNotices = async () => {
-    if (!window.confirm('모든 공지사항을 초기 기본 공지사항으로 되돌리시겠습니까?\n기존에 임의로 추가하거나 수정한 공지는 기본값으로 복구됩니다.')) return;
+    if (!window.confirm('모든 공지사항을 초기 기본 공지사항 2종으로 깨끗하게 초기화하시겠습니까?\n\n초기화 후 관리자 대시보드에서 각 공지를 자유롭게 수정하거나 새 공지를 추가하실 수 있습니다.')) return;
     setIsSaving(true);
     try {
-      saveNoticesToCache(DEFAULT_NOTICES);
-      setNotices(DEFAULT_NOTICES);
-      await syncNoticesToServerAndFiles(DEFAULT_NOTICES);
-      for (const notice of DEFAULT_NOTICES) {
-        await updateNotice(notice.id, {
-          title: notice.title,
-          content: notice.content,
-          category: notice.category,
-          published: notice.published,
-          isPinned: notice.isPinned,
-          imageUrl: notice.imageUrl
-        });
-      }
+      const resetList = await resetAllNotices(DEFAULT_NOTICES);
+      setNotices(resetList);
       triggerSuccessAlert();
       onRefreshData();
-      alert('공지사항이 초기 기본 상태로 성공적으로 복구되었습니다. (GitHub 저장소 파일에도 반영되었습니다)');
+      alert('공지사항이 기본 안내문 2종으로 깨끗하게 초기화되었습니다.\n[수정] 버튼을 눌러 자유롭게 편집하실 수 있습니다.');
     } catch (err) {
       console.warn('Reset notices warning:', err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleClearAllNotices = async () => {
+    if (!window.confirm('모든 공지사항 목록을 완전히 비우시겠습니까?\n\n확인 시 등록된 공지가 모두 비워지며, [새 공지 등록]을 통해 원하는 내용으로 처음부터 자유롭게 작성하실 수 있습니다.')) return;
+    setIsSaving(true);
+    try {
+      const emptyList = await clearAllNotices();
+      setNotices(emptyList);
+      triggerSuccessAlert();
+      onRefreshData();
+      alert('공지사항 목록이 모두 비워졌습니다. 이제 [새 공지 등록] 버튼을 눌러 새 공지사항을 등록해 보세요.');
+    } catch (err) {
+      console.warn('Clear notices warning:', err);
     } finally {
       setIsSaving(false);
     }
@@ -1048,212 +1170,426 @@ ${noscriptArticles}
                 {isCreatingNotice ? (
                   /* Form: Create or Edit */
                   <form onSubmit={handleNoticeSubmit} className="space-y-6">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-                      <h3 className="text-lg font-bold text-white">
-                        {editingNotice ? '공지사항 수정' : '새 공지사항 등록'}
-                      </h3>
-                      <button
-                        type="button"
-                        onClick={() => { setIsCreatingNotice(false); setEditingNotice(null); }}
-                        className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
-                      >
-                        돌아가기
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 gap-6">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-400">제목</label>
-                        <input
-                          type="text"
-                          required
-                          value={noticeForm.title}
-                          onChange={(e) => setNoticeForm({...noticeForm, title: e.target.value})}
-                          placeholder="공지 제목 기입"
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-                        />
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-slate-400">내용</label>
-                        <textarea
-                          required
-                          rows={8}
-                          value={noticeForm.content}
-                          onChange={(e) => setNoticeForm({...noticeForm, content: e.target.value})}
-                          placeholder="글 내용을 상세히 기입하세요..."
-                          className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500 whitespace-pre-line"
-                        />
-                      </div>
-
-                      <div className="space-y-3 md:col-span-2">
-                        <div className="flex items-center justify-between">
-                          <label className="text-xs font-bold text-slate-400">
-                            첨부 이미지 (내 컴퓨터에서 이미지 선택 및 드래그 업로드)
-                          </label>
-                          {noticeForm.imageUrl && (
-                            <span className="text-[11px] text-amber-500 font-semibold">
-                              ✓ 이미지 등록 완료
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h3 className="text-lg font-bold text-white">
+                            {editingNotice ? '공지사항 수정' : '새 공지사항 등록'}
+                          </h3>
+                          {editingNotice && (
+                            <span className="text-xs font-mono text-slate-500 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                              ID: {editingNotice.id}
                             </span>
                           )}
                         </div>
-
-                        {/* Hidden file input */}
-                        <input
-                          type="file"
-                          ref={noticeFileInputRef}
-                          accept="image/*"
-                          onChange={handleNoticeFileChange}
-                          className="hidden"
-                        />
-
-                        {noticeForm.imageUrl ? (
-                          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-4">
-                            <div className="w-28 h-24 rounded-lg overflow-hidden bg-slate-900 border border-slate-800 shrink-0 relative">
-                              <img
-                                src={noticeForm.imageUrl}
-                                alt="첨부 이미지 미리보기"
-                                className="w-full h-full object-cover"
-                                referrerPolicy="no-referrer"
-                              />
-                            </div>
-
-                            <div className="flex-1 overflow-hidden space-y-1 text-center sm:text-left w-full">
-                              <div className="flex items-center justify-center sm:justify-start space-x-2">
-                                <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">
-                                  이미지 연결 완료
-                                </span>
-                                {noticeForm.imageUrl.startsWith('data:') ? (
-                                  <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded font-mono">
-                                    컴퓨터 파일 (자동 압축)
-                                  </span>
-                                ) : (
-                                  <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded font-mono">
-                                    외부 URL
-                                  </span>
-                                )}
-                              </div>
-                              <p className="text-xs text-slate-400 truncate max-w-full font-mono">
-                                {noticeForm.imageUrl.length > 50
-                                  ? noticeForm.imageUrl.substring(0, 50) + '...'
-                                  : noticeForm.imageUrl}
-                              </p>
-                              <p className="text-[11px] text-slate-500">
-                                공지사항 대표 썸네일 및 본문에 고화질로 표시됩니다.
-                              </p>
-                            </div>
-
-                            <div className="flex sm:flex-col gap-2 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => noticeFileInputRef.current?.click()}
-                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
-                              >
-                                <Upload size={13} />
-                                <span>다른 사진 선택</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setNoticeForm({ ...noticeForm, imageUrl: '' })}
-                                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
-                              >
-                                <Trash2 size={13} />
-                                <span>삭제</span>
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div
-                            onDragEnter={handleNoticeDragOver}
-                            onDragOver={handleNoticeDragOver}
-                            onDragLeave={handleNoticeDragOver}
-                            onDrop={handleNoticeDrop}
-                            className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${
-                              noticeDragActive ? 'border-amber-500 bg-amber-500/10' : 'border-slate-800 bg-slate-950/60 hover:border-slate-700'
-                            }`}
-                          >
-                            {isUploadingNoticeImage ? (
-                              <div className="py-4 space-y-2">
-                                <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
-                                <p className="text-xs text-amber-400 font-semibold">내 컴퓨터 이미지 읽는 중 & 최적화 중...</p>
-                              </div>
-                            ) : (
-                              <div className="space-y-3">
-                                <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-amber-500">
-                                  <Upload size={20} />
-                                </div>
-                                <div>
-                                  <p className="text-xs sm:text-sm font-bold text-slate-200">
-                                    내 컴퓨터에 있는 이미지 파일을 여기에 드래그하세요
-                                  </p>
-                                  <p className="text-[11px] text-slate-500 mt-0.5">
-                                    지원 형식: PNG, JPG, WEBP, GIF (자동으로 고화질 최적화)
-                                  </p>
-                                </div>
-
-                                <div className="pt-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => noticeFileInputRef.current?.click()}
-                                    className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer inline-flex items-center space-x-1.5 shadow-sm"
-                                  >
-                                    <Paperclip size={14} />
-                                    <span>내 컴퓨터에서 사진 파일 찾기</span>
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Optional Direct URL Toggle */}
-                        <div className="pt-1">
-                          <details className="text-xs text-slate-500">
-                            <summary className="cursor-pointer hover:text-slate-400 inline-block font-semibold">
-                              🔗 또는 웹 이미지 URL 링크 직접 입력하기
-                            </summary>
-                            <input
-                              type="url"
-                              value={noticeForm.imageUrl}
-                              onChange={(e) => setNoticeForm({ ...noticeForm, imageUrl: e.target.value })}
-                              placeholder="https://images.unsplash.com/... 등 이미지 주소"
-                              className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
-                            />
-                          </details>
-                        </div>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          제목, 본문, 분류, 등록일자, 첨부 이미지를 자유롭게 입력하고 즉시 반영하세요.
+                        </p>
                       </div>
 
-                      <div className="flex items-center space-x-6 md:col-span-2">
-                        <label className="flex items-center space-x-2 text-xs font-bold text-slate-400 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={noticeForm.published}
-                            onChange={(e) => setNoticeForm({...noticeForm, published: e.target.checked})}
-                            className="rounded border-slate-800 bg-slate-950 text-amber-500 focus:ring-0"
-                          />
-                          <span>즉시 전체 공개 여부</span>
-                        </label>
+                      <div className="flex items-center gap-2">
+                        {/* Mode Switch: Edit vs Preview */}
+                        <div className="bg-slate-950 p-1 rounded-xl border border-slate-800 flex items-center">
+                          <button
+                            type="button"
+                            onClick={() => setPreviewNoticeMode(false)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              !previewNoticeMode
+                                ? 'bg-amber-600 text-white shadow'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            ✍️ 작성/수정
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewNoticeMode(true)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              previewNoticeMode
+                                ? 'bg-amber-600 text-white shadow'
+                                : 'text-slate-400 hover:text-white'
+                            }`}
+                          >
+                            👁️ 웹사이트 미리보기
+                          </button>
+                        </div>
 
-                        <label className="flex items-center space-x-2 text-xs font-bold text-slate-400 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={noticeForm.isPinned}
-                            onChange={(e) => setNoticeForm({...noticeForm, isPinned: e.target.checked})}
-                            className="rounded border-slate-800 bg-slate-950 text-amber-500 focus:ring-0"
-                          />
-                          <span>상단 중요 공지 고정 (Pin)</span>
-                        </label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsCreatingNotice(false);
+                            setEditingNotice(null);
+                            setPreviewNoticeMode(false);
+                          }}
+                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+                        >
+                          목록으로 돌아가기
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3">
+                    {previewNoticeMode ? (
+                      /* Live Public Preview Card */
+                      <div className="space-y-4">
+                        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 flex items-center justify-between text-xs text-amber-300">
+                          <span>💡 <strong>홈페이지 공지사항 미리보기:</strong> 실제 방문자 화면에서 아래와 같은 디자인으로 표출됩니다.</span>
+                          <button
+                            type="button"
+                            onClick={() => setPreviewNoticeMode(false)}
+                            className="text-amber-400 hover:text-white font-bold underline cursor-pointer"
+                          >
+                            다시 편집하기
+                          </button>
+                        </div>
+
+                        <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4 max-w-4xl mx-auto shadow-xl">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-2.5 py-0.5 rounded-md text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                              {isCustomCategory ? (customCategory || '분류미정') : noticeForm.category}
+                            </span>
+                            {noticeForm.isPinned && (
+                              <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center space-x-1">
+                                <Pin size={11} className="fill-rose-400" />
+                                <span>상단 고정 공지</span>
+                              </span>
+                            )}
+                            {!noticeForm.published && (
+                              <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                                🔒 비공개 (임시저장)
+                              </span>
+                            )}
+                            <span className="text-xs text-slate-400 font-mono flex items-center space-x-1 ml-auto">
+                              <Calendar size={13} className="text-slate-500" />
+                              <span>{noticeForm.createdAtDate || '오늘'}</span>
+                            </span>
+                          </div>
+
+                          <h2 className="text-xl sm:text-2xl font-black text-white">
+                            {noticeForm.title || '(제목이 비어 있습니다)'}
+                          </h2>
+
+                          {noticeForm.imageUrl && (
+                            <div className="rounded-xl overflow-hidden border border-slate-800 max-h-96 bg-slate-900">
+                              <img 
+                                src={noticeForm.imageUrl} 
+                                alt="공지 이미지 미리보기" 
+                                className="w-full h-auto object-cover max-h-96"
+                                referrerPolicy="no-referrer"
+                              />
+                            </div>
+                          )}
+
+                          <div className="pt-2 text-slate-300 text-sm leading-relaxed whitespace-pre-line border-t border-slate-800/80">
+                            {noticeForm.content || '(본문 내용이 비어 있습니다)'}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      /* Edit Mode Form Controls */
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        {/* Category Selector & Custom Input */}
+                        <div className="space-y-2 md:col-span-2">
+                          <label className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                            <span>공지사항 분류 (카테고리)</span>
+                            <span className="text-[11px] text-slate-500 font-normal">자주 쓰는 분류를 누르거나 [직접입력]을 선택하세요</span>
+                          </label>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            {['양성화안내', '소식', '건축법령', '자주묻는질문', '보도자료'].map(cat => (
+                              <button
+                                key={cat}
+                                type="button"
+                                onClick={() => {
+                                  setIsCustomCategory(false);
+                                  setNoticeForm({ ...noticeForm, category: cat });
+                                }}
+                                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                                  !isCustomCategory && noticeForm.category === cat
+                                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                                    : 'bg-slate-950 hover:bg-slate-900 text-slate-300 border-slate-800'
+                                }`}
+                              >
+                                {cat}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsCustomCategory(true);
+                                setNoticeForm({ ...noticeForm, category: '직접입력' });
+                              }}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                                isCustomCategory
+                                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-sm'
+                                  : 'bg-slate-950 hover:bg-slate-900 text-slate-300 border-slate-800'
+                              }`}
+                            >
+                              + 직접 입력
+                            </button>
+                          </div>
+
+                          {isCustomCategory && (
+                            <div className="pt-2 animate-fade-in">
+                              <input
+                                type="text"
+                                value={customCategory}
+                                onChange={(e) => setCustomCategory(e.target.value)}
+                                placeholder="새로운 분류명을 입력하세요 (예: 지자체조례, 상담후기, 세무안내 등)"
+                                className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                              />
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Date Input */}
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-slate-300 flex items-center space-x-1.5">
+                              <Calendar size={13} className="text-amber-500" />
+                              <span>게시 등록 일자</span>
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const now = new Date();
+                                const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                                setNoticeForm({ ...noticeForm, createdAtDate: dateStr });
+                              }}
+                              className="text-[11px] text-amber-400 hover:text-amber-300 underline font-semibold cursor-pointer"
+                            >
+                              오늘 날짜로 설정
+                            </button>
+                          </div>
+                          <input
+                            type="date"
+                            value={noticeForm.createdAtDate}
+                            onChange={(e) => setNoticeForm({...noticeForm, createdAtDate: e.target.value})}
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+
+                        {/* Title Input */}
+                        <div className="space-y-2 md:col-span-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-slate-300">공지사항 제목</label>
+                            <span className="text-[11px] text-slate-500 font-mono">
+                              {noticeForm.title.length}자 입력됨
+                            </span>
+                          </div>
+                          <input
+                            type="text"
+                            required
+                            value={noticeForm.title}
+                            onChange={(e) => setNoticeForm({...noticeForm, title: e.target.value})}
+                            placeholder="예: [양성화 안내] 2026년도 특정건축물 양성화 특별조치법 세부 지침"
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500 font-medium"
+                          />
+                        </div>
+
+                        {/* Content Textarea */}
+                        <div className="space-y-2 md:col-span-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-slate-300">공지 본문 내용</label>
+                            <span className="text-[11px] text-slate-500 font-mono">
+                              {noticeForm.content.length}자 / 줄바꿈 자동 유지
+                            </span>
+                          </div>
+                          <textarea
+                            required
+                            rows={10}
+                            value={noticeForm.content}
+                            onChange={(e) => setNoticeForm({...noticeForm, content: e.target.value})}
+                            placeholder="공지할 내용을 상세히 입력하세요. 줄바꿈(엔터)이 그대로 보존되어 홈페이지에 깔끔하게 표시됩니다..."
+                            className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-amber-500 whitespace-pre-line leading-relaxed"
+                          />
+                        </div>
+
+                        {/* Image Attachment */}
+                        <div className="space-y-3 md:col-span-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-slate-300">
+                              첨부 이미지 (선택 사항: 내 컴퓨터에서 사진 선택 및 드래그 업로드)
+                            </label>
+                            {noticeForm.imageUrl && (
+                              <span className="text-[11px] text-emerald-400 font-semibold flex items-center space-x-1">
+                                <Check size={13} />
+                                <span>이미지 등록됨</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Hidden file input */}
+                          <input
+                            type="file"
+                            ref={noticeFileInputRef}
+                            accept="image/*"
+                            onChange={handleNoticeFileChange}
+                            className="hidden"
+                          />
+
+                          {noticeForm.imageUrl ? (
+                            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row items-center gap-4">
+                              <div className="w-28 h-24 rounded-lg overflow-hidden bg-slate-900 border border-slate-800 shrink-0 relative">
+                                <img
+                                  src={noticeForm.imageUrl}
+                                  alt="첨부 이미지 미리보기"
+                                  className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                              </div>
+
+                              <div className="flex-1 overflow-hidden space-y-1 text-center sm:text-left w-full">
+                                <div className="flex items-center justify-center sm:justify-start space-x-2">
+                                  <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">
+                                    이미지 연결 완료
+                                  </span>
+                                  {noticeForm.imageUrl.startsWith('data:') ? (
+                                    <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded font-mono">
+                                      컴퓨터 파일 (자동 압축)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded font-mono">
+                                      외부 URL
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-400 truncate max-w-full font-mono">
+                                  {noticeForm.imageUrl.length > 50
+                                    ? noticeForm.imageUrl.substring(0, 50) + '...'
+                                    : noticeForm.imageUrl}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  공지사항 목록 썸네일 및 본문 상세보기에 고화질로 표시됩니다.
+                                </p>
+                              </div>
+
+                              <div className="flex sm:flex-col gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => noticeFileInputRef.current?.click()}
+                                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
+                                >
+                                  <Upload size={13} />
+                                  <span>다른 사진 선택</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setNoticeForm({ ...noticeForm, imageUrl: '' })}
+                                  className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer flex items-center space-x-1"
+                                >
+                                  <Trash2 size={13} />
+                                  <span>사진 삭제</span>
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              onDragEnter={handleNoticeDragOver}
+                              onDragOver={handleNoticeDragOver}
+                              onDragLeave={handleNoticeDragOver}
+                              onDrop={handleNoticeDrop}
+                              className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${
+                                noticeDragActive ? 'border-amber-500 bg-amber-500/10' : 'border-slate-800 bg-slate-950/60 hover:border-slate-700'
+                              }`}
+                            >
+                              {isUploadingNoticeImage ? (
+                                <div className="py-4 space-y-2">
+                                  <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                                  <p className="text-xs text-amber-400 font-semibold">내 컴퓨터 이미지 읽는 중 & 최적화 중...</p>
+                                </div>
+                              ) : (
+                                <div className="space-y-3">
+                                  <div className="w-10 h-10 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-amber-500">
+                                    <Upload size={20} />
+                                  </div>
+                                  <div>
+                                    <p className="text-xs sm:text-sm font-bold text-slate-200">
+                                      내 컴퓨터에 있는 사진이나 안내문 이미지를 여기에 드래그하세요
+                                    </p>
+                                    <p className="text-[11px] text-slate-500 mt-0.5">
+                                      지원 형식: PNG, JPG, WEBP, GIF (선명한 화질로 자동 압축)
+                                    </p>
+                                  </div>
+
+                                  <div className="pt-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => noticeFileInputRef.current?.click()}
+                                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg text-xs transition-colors cursor-pointer inline-flex items-center space-x-1.5 shadow-sm"
+                                    >
+                                      <Paperclip size={14} />
+                                      <span>내 컴퓨터에서 사진 파일 찾기</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Optional Direct URL Toggle */}
+                          <div className="pt-1">
+                            <details className="text-xs text-slate-500">
+                              <summary className="cursor-pointer hover:text-slate-400 inline-block font-semibold">
+                                🔗 또는 웹 이미지 URL 링크 직접 입력하기
+                              </summary>
+                              <input
+                                type="url"
+                                value={noticeForm.imageUrl}
+                                onChange={(e) => setNoticeForm({ ...noticeForm, imageUrl: e.target.value })}
+                                placeholder="https://images.unsplash.com/... 등 이미지 웹 링크"
+                                className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                              />
+                            </details>
+                          </div>
+                        </div>
+
+                        {/* Visibility & Pin Settings */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:col-span-2 pt-2">
+                          <label className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-start space-x-3 cursor-pointer hover:border-slate-700 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={noticeForm.published}
+                              onChange={(e) => setNoticeForm({...noticeForm, published: e.target.checked})}
+                              className="mt-0.5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0"
+                            />
+                            <div>
+                              <span className="text-xs font-bold text-white block">즉시 전체 공개</span>
+                              <span className="text-[11px] text-slate-400 block mt-0.5">
+                                체크 시 즉시 홈페이지 공지사항 목록에 노출됩니다. (해제 시 관리자만 볼 수 있는 임시보관 상태)
+                              </span>
+                            </div>
+                          </label>
+
+                          <label className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex items-start space-x-3 cursor-pointer hover:border-slate-700 transition-colors">
+                            <input
+                              type="checkbox"
+                              checked={noticeForm.isPinned}
+                              onChange={(e) => setNoticeForm({...noticeForm, isPinned: e.target.checked})}
+                              className="mt-0.5 rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0"
+                            />
+                            <div>
+                              <span className="text-xs font-bold text-white flex items-center space-x-1.5">
+                                <Pin size={13} className="text-rose-400 fill-rose-400" />
+                                <span>상단 중요 공지 고정 (Pin)</span>
+                              </span>
+                              <span className="text-[11px] text-slate-400 block mt-0.5">
+                                체크 시 목록 최상단에 붉은색 중요 고정 배지와 함께 눈에 띄게 우선 배치됩니다.
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Form Action Buttons */}
+                    <div className="flex flex-wrap items-center gap-3 pt-4 border-t border-slate-800">
                       <button
                         type="submit"
                         disabled={isSaving}
-                        className="px-6 py-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold rounded-xl text-sm flex items-center space-x-2 shadow cursor-pointer"
+                        className="px-6 py-3 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white font-bold rounded-xl text-sm flex items-center space-x-2 shadow cursor-pointer transition-all"
                       >
                         <Save size={16} />
-                        <span>{isSaving ? '저장 중...' : '저장 및 배포'}</span>
+                        <span>{isSaving ? '저장 및 배포 중...' : '저장 및 즉시 배포'}</span>
                       </button>
 
                       {editingNotice && (
@@ -1273,8 +1609,9 @@ ${noscriptArticles}
                         onClick={() => {
                           setIsCreatingNotice(false);
                           setEditingNotice(null);
+                          setPreviewNoticeMode(false);
                         }}
-                        className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-semibold transition-colors cursor-pointer"
+                        className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-sm font-semibold transition-colors cursor-pointer ml-auto"
                       >
                         취소
                       </button>
@@ -1285,16 +1622,55 @@ ${noscriptArticles}
                   <div className="space-y-6">
                     <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                       <div>
-                        <h2 className="text-xl font-bold text-white">공지사항 목록</h2>
-                        <p className="text-slate-400 text-xs sm:text-sm">작성한 글들을 조회, 수정, 임시보관 처리, 혹은 삭제할 수 있습니다. (수정 즉시 홈페이지 및 캐시에 영구 반영)</p>
+                        <div className="flex items-center space-x-2">
+                          <h2 className="text-xl font-bold text-white">공지사항 관리 및 자유 편집</h2>
+                          <span className="text-xs font-bold px-2 py-0.5 bg-amber-500/20 text-amber-400 rounded-full border border-amber-500/30">
+                            총 {notices.length}개
+                          </span>
+                        </div>
+                        <p className="text-slate-400 text-xs sm:text-sm mt-1">
+                          제목, 본문, 일자, 분류를 자유롭게 수정하거나 추가/삭제할 수 있습니다. (수정 즉시 홈페이지 및 캐시에 영구 반영)
+                        </p>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-2.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Primary: Create Notice */}
+                        <button
+                          onClick={handleStartCreateNotice}
+                          className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-1.5 cursor-pointer shadow transition-all"
+                        >
+                          <Plus size={16} />
+                          <span>새 공지 등록</span>
+                        </button>
+
+                        {/* Reset to Clean Defaults */}
+                        <button
+                          type="button"
+                          onClick={handleResetToDefaultNotices}
+                          className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
+                          title="기본 공지사항 2종으로 깨끗하게 초기화"
+                        >
+                          <RotateCcw size={14} className="text-amber-400" />
+                          <span>기본값 2종 초기화</span>
+                        </button>
+
+                        {/* Clear All Notices */}
+                        <button
+                          type="button"
+                          onClick={handleClearAllNotices}
+                          className="px-3 py-2 bg-slate-900 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
+                          title="목록을 모두 비우고 처음부터 새로 작성"
+                        >
+                          <FolderMinus size={14} />
+                          <span>목록 전체 비우기</span>
+                        </button>
+
+                        {/* GitHub File Sync */}
                         <button
                           type="button"
                           onClick={handleSyncToGitHubFiles}
                           disabled={isGitHubSyncing}
-                          className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow border ${
+                          className={`px-3 py-2 text-xs font-bold rounded-xl flex items-center space-x-1.5 transition-all cursor-pointer shadow border ${
                             gitHubSyncSuccess
                               ? 'bg-emerald-600 text-white border-emerald-500'
                               : 'bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 hover:text-white border-emerald-600/40'
@@ -1305,52 +1681,26 @@ ${noscriptArticles}
                           <span>{isGitHubSyncing ? '파일 동기화 중...' : gitHubSyncSuccess ? 'GitHub 파일 저장완료!' : 'GitHub 파일 영구 저장'}</span>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={handleCopyNoticeCode}
-                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-700"
-                          title="정적 웹사이트 배포용 JSON 데이터 복사"
-                        >
-                          {copiedNoticeCode ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                          <span>{copiedNoticeCode ? '데이터 복사됨!' : '배포용 데이터 복사'}</span>
-                        </button>
-
+                        {/* JSON Bulk Edit */}
                         <button
                           type="button"
                           onClick={handleOpenImportModal}
-                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-700"
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-700"
                           title="JSON 데이터 직접 편집 또는 붙여넣어 즉시 업데이트"
                         >
                           <FileCode size={14} className="text-amber-400" />
-                          <span>JSON 데이터 가져오기 / 일괄 수정</span>
+                          <span>JSON 일괄 편집</span>
                         </button>
 
+                        {/* HTML Code Export */}
                         <button
                           type="button"
                           onClick={() => setIsHtmlModalOpen(true)}
-                          className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-cyan-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-cyan-500/30"
+                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-cyan-200 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-cyan-500/30"
                           title="현재 공지사항이 포함된 HTML 소스코드 생성 및 다운로드"
                         >
                           <Code size={14} className="text-cyan-400" />
-                          <span>HTML 코드 내보내기 / 다운로드</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleResetToDefaultNotices}
-                          className="px-3.5 py-2 bg-slate-900 hover:bg-rose-950/30 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
-                          title="초기 기본 공지사항으로 되돌리기"
-                        >
-                          <RotateCcw size={14} />
-                          <span>기본값 복구</span>
-                        </button>
-
-                        <button
-                          onClick={() => setIsCreatingNotice(true)}
-                          className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-sm flex items-center justify-center space-x-1.5 cursor-pointer shadow"
-                        >
-                          <Plus size={16} />
-                          <span>새 공지 등록</span>
+                          <span>HTML 내보내기</span>
                         </button>
                       </div>
                     </div>
@@ -1360,7 +1710,7 @@ ${noscriptArticles}
                       <div className="flex items-center space-x-2.5 text-xs text-emerald-300">
                         <CheckCircle size={16} className="text-emerald-400 shrink-0" />
                         <span>
-                          <strong>GitHub 자동 동기화 활성화됨:</strong> 공지사항을 추가·수정·삭제하면 프로젝트 파일(<code className="bg-emerald-950 px-1 py-0.5 rounded text-emerald-200">notices.json</code> 및 <code className="bg-emerald-950 px-1 py-0.5 rounded text-emerald-200">index.html</code>)에 자동으로 영구 저장되어 GitHub Push 시 최신 내용이 유지됩니다.
+                          <strong>영구 저장 및 자동 동기화 활성화:</strong> 관리자 화면에서 수정한 모든 공지사항은 즉시 Firestore DB 및 프로젝트 정적 파일(<code className="bg-emerald-950 px-1 py-0.5 rounded text-emerald-200">notices.json</code>, <code className="bg-emerald-950 px-1 py-0.5 rounded text-emerald-200">index.html</code>)에 안전하게 반영됩니다.
                         </span>
                       </div>
                       <button
@@ -1375,66 +1725,175 @@ ${noscriptArticles}
 
                     {/* Search box */}
                     <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-500">
+                      <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-500">
                         <Search size={16} />
                       </span>
                       <input
                         type="text"
-                        placeholder="이름 또는 본문 키워드 필터링..."
+                        placeholder="공지 제목, 본문, 카테고리 검색..."
                         value={noticeSearch}
                         onChange={(e) => setNoticeSearch(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-sm text-white focus:outline-none"
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
 
-                    {/* List Grid */}
+                    {/* List of Notices */}
                     <div className="space-y-3">
-                      {filteredNotices.map(notice => (
-                        <div 
-                          key={notice.id}
-                          className="bg-slate-950/60 p-4 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 hover:border-slate-700 transition-colors"
-                        >
-                          <div>
-                            <div className="flex items-center space-x-2 mb-1.5">
-                              {notice.isPinned && (
-                                <span className="text-[10px] font-bold bg-rose-500/20 text-rose-400 px-2 py-0.5 rounded border border-rose-500/30">
-                                  중요 고정
-                                </span>
-                              )}
-                              {!notice.published && (
-                                <span className="text-[10px] font-bold bg-slate-800 text-slate-500 px-2 py-0.5 rounded">
-                                  임시 저장
-                                </span>
-                              )}
-                            </div>
-                            <h4 className="font-bold text-white text-sm sm:text-base line-clamp-1">{notice.title}</h4>
-                          </div>
+                      {filteredNotices.map(notice => {
+                        let dateStr = '';
+                        if (notice.createdAt) {
+                          const d = new Date(notice.createdAt);
+                          if (!isNaN(d.getTime())) {
+                            dateStr = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+                          }
+                        }
 
-                          <div className="flex items-center space-x-2 shrink-0">
+                        return (
+                          <div 
+                            key={notice.id}
+                            className="bg-slate-950/80 p-4 sm:p-5 rounded-2xl border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-slate-700 transition-all shadow-sm"
+                          >
+                            <div className="flex items-start space-x-4 flex-1 min-w-0">
+                              {/* Thumbnail preview */}
+                              {notice.imageUrl ? (
+                                <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 shrink-0">
+                                  <img 
+                                    src={notice.imageUrl} 
+                                    alt="" 
+                                    className="w-full h-full object-cover"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 text-slate-600">
+                                  <FileText size={22} />
+                                </div>
+                              )}
+
+                              <div className="space-y-1.5 flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  {/* Category */}
+                                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                    {notice.category || '양성화안내'}
+                                  </span>
+
+                                  {/* Pin status */}
+                                  {notice.isPinned && (
+                                    <span className="text-[11px] font-bold bg-rose-500/20 text-rose-400 px-2 py-0.5 rounded-md border border-rose-500/30 flex items-center space-x-1">
+                                      <Pin size={10} className="fill-rose-400" />
+                                      <span>상단 고정</span>
+                                    </span>
+                                  )}
+
+                                  {/* Published status */}
+                                  {notice.published !== false ? (
+                                    <span className="text-[11px] font-bold bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded-md border border-emerald-500/20">
+                                      공개중
+                                    </span>
+                                  ) : (
+                                    <span className="text-[11px] font-bold bg-slate-800 text-slate-400 px-2 py-0.5 rounded-md border border-slate-700">
+                                      비공개 (임시)
+                                    </span>
+                                  )}
+
+                                  {/* Date */}
+                                  {dateStr && (
+                                    <span className="text-xs text-slate-500 font-mono ml-1 flex items-center space-x-1">
+                                      <Calendar size={11} className="text-slate-600" />
+                                      <span>{dateStr}</span>
+                                    </span>
+                                  )}
+                                </div>
+
+                                <h4 className="font-bold text-white text-sm sm:text-base line-clamp-1">
+                                  {notice.title}
+                                </h4>
+
+                                <p className="text-xs text-slate-400 line-clamp-1">
+                                  {notice.content}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Actions */}
+                            <div className="flex flex-wrap items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-900">
+                              {/* 1-click Pin Toggle */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleNoticePin(notice)}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer border ${
+                                  notice.isPinned
+                                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/30 hover:bg-rose-500/30'
+                                    : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800'
+                                }`}
+                                title={notice.isPinned ? "상단 고정 해제" : "상단 중요 고정"}
+                              >
+                                <Pin size={12} className={notice.isPinned ? "fill-rose-400" : ""} />
+                                <span>{notice.isPinned ? '고정해제' : '상단고정'}</span>
+                              </button>
+
+                              {/* 1-click Publish Toggle */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleNoticePublish(notice)}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center space-x-1 transition-colors cursor-pointer border ${
+                                  notice.published !== false
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                                    : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800'
+                                }`}
+                                title={notice.published !== false ? "비공개로 전환" : "공개로 전환"}
+                              >
+                                <Eye size={12} />
+                                <span>{notice.published !== false ? '공개중' : '비공개'}</span>
+                              </button>
+
+                              {/* Edit Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleEditNotice(notice)}
+                                className="px-3 py-1.5 bg-amber-600/10 hover:bg-amber-600 text-amber-400 hover:text-white border border-amber-500/30 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 text-xs font-bold shadow-sm"
+                                title="상세 내용 수정"
+                              >
+                                <Edit2 size={13} />
+                                <span>수정</span>
+                              </button>
+
+                              {/* Delete Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteNoticeClick(notice.id)}
+                                className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 text-xs font-semibold"
+                                title="공지사항 삭제"
+                              >
+                                <Trash2 size={13} />
+                                <span>삭제</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {filteredNotices.length === 0 && (
+                        <div className="text-center py-12 bg-slate-950/40 rounded-2xl border border-slate-800 space-y-3">
+                          <FileText size={32} className="text-slate-600 mx-auto" />
+                          <p className="text-slate-400 text-sm font-medium">작성된 공지사항이 없거나 검색 결과가 비어 있습니다.</p>
+                          <div className="flex items-center justify-center gap-2 pt-1">
                             <button
                               type="button"
-                              onClick={() => handleEditNotice(notice)}
-                              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg hover:text-white transition-colors cursor-pointer flex items-center space-x-1 text-xs font-semibold"
-                              title="수정"
+                              onClick={handleStartCreateNotice}
+                              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs cursor-pointer"
                             >
-                              <Edit2 size={13} />
-                              <span>수정</span>
+                              새 공지 작성하기
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteNoticeClick(notice.id)}
-                              className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 text-xs font-semibold"
-                              title="삭제"
+                              onClick={handleResetToDefaultNotices}
+                              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs cursor-pointer"
                             >
-                              <Trash2 size={13} />
-                              <span>삭제</span>
+                              기본 공지 2종 불러오기
                             </button>
                           </div>
                         </div>
-                      ))}
-
-                      {filteredNotices.length === 0 && (
-                        <p className="text-center text-slate-500 text-sm py-10">작성 완료된 글이 없거나 검색 결과가 비어 있습니다.</p>
                       )}
                     </div>
 

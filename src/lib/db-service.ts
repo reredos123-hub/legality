@@ -243,20 +243,23 @@ export function getNoticesFromHtmlDocument(): Notice[] | null {
 export function getStoredNotices(): Notice[] {
   if (typeof window === 'undefined') return DEFAULT_NOTICES;
   
-  const htmlNotices = getNoticesFromHtmlDocument();
-
   const cachedJson = localStorage.getItem('lohas_cache_notices');
-  if (cachedJson) {
+  if (cachedJson !== null) {
     try {
       const parsed = JSON.parse(cachedJson) as Notice[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.map(n => ({
+          ...n,
+          createdAt: n.createdAt ? new Date(n.createdAt) : new Date(),
+          updatedAt: n.updatedAt ? new Date(n.updatedAt) : new Date()
+        }));
       }
     } catch (e) {
       console.warn('Failed to parse cached notices:', e);
     }
   }
 
+  const htmlNotices = getNoticesFromHtmlDocument();
   const initialList = htmlNotices && htmlNotices.length > 0 ? htmlNotices : DEFAULT_NOTICES;
 
   // If no cache exists, initialize with HTML or DEFAULT_NOTICES
@@ -434,19 +437,24 @@ export async function seedDatabaseIfNeeded() {
       }
     }
 
-    // 6. Check Notices Collection (seed only if empty)
+    // 6. Check Notices Collection (seed only once initially, never overwrite user changes or empty lists)
     try {
-      const noticesRef = collection(db, 'notices');
-      const noticesSnap = await getDocs(noticesRef);
-      if (noticesSnap.empty) {
-        for (const notice of DEFAULT_NOTICES) {
-          const { id, createdAt, updatedAt, ...cleanNotice } = notice;
-          await setDoc(doc(db, 'notices', id), {
-            ...cleanNotice,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          });
+      const seedInfoSnap = await getDoc(seedInfoRef);
+      const isNoticesAlreadySeeded = seedInfoSnap.exists() && seedInfoSnap.data()?.noticesSeeded === true;
+      if (!isNoticesAlreadySeeded) {
+        const noticesRef = collection(db, 'notices');
+        const noticesSnap = await getDocs(noticesRef);
+        if (noticesSnap.empty) {
+          for (const notice of DEFAULT_NOTICES) {
+            const { id, createdAt, updatedAt, ...cleanNotice } = notice;
+            await setDoc(doc(db, 'notices', id), {
+              ...cleanNotice,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp()
+            });
+          }
         }
+        await setDoc(seedInfoRef, { noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
       }
     } catch (e) {
       console.warn('Syncing notices in seedDatabaseIfNeeded warning:', e);
@@ -672,38 +680,46 @@ export async function fetchNotices(): Promise<Notice[]> {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       });
 
-      if (list.length > 0) {
-        saveNoticesToCache(list);
-        return list;
-      }
+      saveNoticesToCache(list);
+      return list;
     }
   } catch (error) {
     console.warn('Firestore fetchNotices warning (using local/deployed notices):', error);
   }
 
-  return localList.length > 0 ? localList : DEFAULT_NOTICES;
+  return localList;
 }
 
 // Create Notice (immediately updates local cache and persists to Firestore)
-export async function createNotice(notice: Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+export async function createNotice(notice: Omit<Notice, 'id' | 'createdAt' | 'updatedAt'> & { createdAt?: Date }): Promise<string> {
   const newId = `notice-${Date.now()}`;
   const newNotice: Notice = {
     id: newId,
-    ...notice,
-    createdAt: new Date(),
+    title: notice.title || '새 공지사항',
+    content: notice.content || '',
+    category: notice.category || '양성화안내',
+    published: notice.published !== false,
+    isPinned: !!notice.isPinned,
+    imageUrl: notice.imageUrl || '',
+    createdAt: notice.createdAt ? new Date(notice.createdAt) : new Date(),
     updatedAt: new Date()
   };
 
   const currentList = getStoredNotices();
-  const updatedList = [newNotice, ...currentList];
+  const updatedList = [newNotice, ...currentList.filter(n => n.id !== newId)];
   saveNoticesToCache(updatedList);
   syncNoticesToServerAndFiles(updatedList);
 
   try {
     const docRef = doc(db, 'notices', newId);
     await setDoc(docRef, {
-      ...notice,
-      createdAt: serverTimestamp(),
+      title: newNotice.title,
+      content: newNotice.content,
+      category: newNotice.category,
+      published: newNotice.published,
+      isPinned: newNotice.isPinned,
+      imageUrl: newNotice.imageUrl,
+      createdAt: notice.createdAt ? new Date(notice.createdAt) : serverTimestamp(),
       updatedAt: serverTimestamp()
     });
   } catch (error) {
@@ -713,8 +729,8 @@ export async function createNotice(notice: Omit<Notice, 'id' | 'createdAt' | 'up
   return newId;
 }
 
-// Update Notice (immediately updates local cache and persists to Firestore with setDoc merge)
-export async function updateNotice(id: string, notice: Partial<Omit<Notice, 'id' | 'createdAt' | 'updatedAt'>>): Promise<Notice[]> {
+// Update Notice (immediately updates local cache and persists to Firestore with sanitized fields)
+export async function updateNotice(id: string, notice: Partial<Notice>): Promise<Notice[]> {
   const currentList = getStoredNotices();
   let found = false;
   const updatedList = currentList.map(n => {
@@ -723,6 +739,7 @@ export async function updateNotice(id: string, notice: Partial<Omit<Notice, 'id'
       return {
         ...n,
         ...notice,
+        createdAt: notice.createdAt ? new Date(notice.createdAt) : n.createdAt,
         updatedAt: new Date()
       };
     }
@@ -738,7 +755,7 @@ export async function updateNotice(id: string, notice: Partial<Omit<Notice, 'id'
       published: notice.published !== false,
       isPinned: !!notice.isPinned,
       imageUrl: notice.imageUrl || '',
-      createdAt: new Date(),
+      createdAt: notice.createdAt ? new Date(notice.createdAt) : new Date(),
       updatedAt: new Date(),
       ...notice
     } as Notice);
@@ -749,10 +766,18 @@ export async function updateNotice(id: string, notice: Partial<Omit<Notice, 'id'
 
   try {
     const docRef = doc(db, 'notices', id);
-    await setDoc(docRef, {
-      ...notice,
+    const sanitizedNotice: any = {
       updatedAt: serverTimestamp()
-    }, { merge: true });
+    };
+    if (notice.title !== undefined) sanitizedNotice.title = notice.title;
+    if (notice.content !== undefined) sanitizedNotice.content = notice.content;
+    if (notice.category !== undefined) sanitizedNotice.category = notice.category;
+    if (notice.published !== undefined) sanitizedNotice.published = notice.published;
+    if (notice.isPinned !== undefined) sanitizedNotice.isPinned = notice.isPinned;
+    if (notice.imageUrl !== undefined) sanitizedNotice.imageUrl = notice.imageUrl;
+    if (notice.createdAt !== undefined) sanitizedNotice.createdAt = new Date(notice.createdAt);
+
+    await setDoc(docRef, sanitizedNotice, { merge: true });
   } catch (error) {
     console.warn(`Firestore updateNotice (${id}) warning (saved to local cache):`, error);
   }
@@ -772,7 +797,7 @@ export async function deleteNotice(id: string): Promise<Notice[]> {
     await deleteDoc(docRef);
     localStorage.setItem('lohas_db_seeded', 'true');
     try {
-      await setDoc(doc(db, 'system', 'seedInfo'), { seeded: true, updatedAt: serverTimestamp() }, { merge: true });
+      await setDoc(doc(db, 'system', 'seedInfo'), { seeded: true, noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
     } catch (e) {
       // ignore
     }
@@ -781,6 +806,64 @@ export async function deleteNotice(id: string): Promise<Notice[]> {
   }
 
   return updatedList;
+}
+
+// Full reset of notices to standard clean defaults
+export async function resetAllNotices(customList: Notice[] = DEFAULT_NOTICES): Promise<Notice[]> {
+  const cleanList = customList.map(n => ({
+    ...n,
+    createdAt: n.createdAt ? new Date(n.createdAt) : new Date(),
+    updatedAt: new Date()
+  }));
+
+  saveNoticesToCache(cleanList);
+  syncNoticesToServerAndFiles(cleanList);
+
+  try {
+    const noticesRef = collection(db, 'notices');
+    const snap = await getDocs(noticesRef);
+    const deletePromises = snap.docs.map(d => deleteDoc(doc(db, 'notices', d.id)));
+    await Promise.all(deletePromises);
+
+    for (const notice of cleanList) {
+      const { id, createdAt, updatedAt, ...cleanNotice } = notice;
+      await setDoc(doc(db, 'notices', id), {
+        ...cleanNotice,
+        createdAt: createdAt ? new Date(createdAt) : serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    }
+
+    const seedInfoRef = doc(db, 'system', 'seedInfo');
+    await setDoc(seedInfoRef, { noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
+    localStorage.setItem('lohas_db_seeded', 'true');
+  } catch (err) {
+    console.warn('Firestore resetAllNotices warning:', err);
+  }
+
+  return cleanList;
+}
+
+// Clear all notices so the user can start from a completely clean slate
+export async function clearAllNotices(): Promise<Notice[]> {
+  const emptyList: Notice[] = [];
+  saveNoticesToCache(emptyList);
+  syncNoticesToServerAndFiles(emptyList);
+
+  try {
+    const noticesRef = collection(db, 'notices');
+    const snap = await getDocs(noticesRef);
+    const deletePromises = snap.docs.map(d => deleteDoc(doc(db, 'notices', d.id)));
+    await Promise.all(deletePromises);
+
+    const seedInfoRef = doc(db, 'system', 'seedInfo');
+    await setDoc(seedInfoRef, { noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
+    localStorage.setItem('lohas_db_seeded', 'true');
+  } catch (err) {
+    console.warn('Firestore clearAllNotices warning:', err);
+  }
+
+  return emptyList;
 }
 
 // Fetch Media Items
