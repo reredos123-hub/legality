@@ -181,7 +181,7 @@ export default function App() {
     const savedAdmin = localStorage.getItem('lohas_admin_session');
     if (savedAdmin === 'true') {
       setAdminUser({
-        email: 'reredos123@gmail.com',
+        email: 'reredos@naver.com',
         displayName: '관리자'
       } as any);
     }
@@ -189,7 +189,7 @@ export default function App() {
     // Setup Firebase Auth observer
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       if (user) {
-        if (user.email === 'reredos123@gmail.com') {
+        if (user.email === 'reredos@naver.com' || user.email === 'reredos123@gmail.com') {
           setAdminUser(user);
           localStorage.setItem('lohas_admin_session', 'true');
         }
@@ -214,7 +214,7 @@ export default function App() {
 
     if (adminPassword === 'master8879') {
       const mockAdminUser = {
-        email: 'reredos123@gmail.com',
+        email: 'reredos@naver.com',
         displayName: '관리자'
       } as any;
       setAdminUser(mockAdminUser);
@@ -293,7 +293,7 @@ export default function App() {
             "addressCountry": "KR"
           },
           "telephone": "02-499-0229",
-          "email": "reredos123@gmail.com",
+          "email": "reredos@naver.com",
           "founder": {
             "@type": "Person",
             "name": "김용호"
@@ -651,7 +651,7 @@ export default function App() {
                   <div className="space-y-3 mb-4">
                     <div className="flex items-center space-x-2 text-xs sm:text-sm text-slate-600">
                       <Mail size={15} className="text-slate-400 shrink-0" />
-                      <span>이메일: <a href="mailto:reredos123@gmail.com" className="text-amber-600 font-bold hover:underline">reredos123@gmail.com</a></span>
+                      <span>이메일: <a href="mailto:reredos@naver.com" className="text-amber-600 font-bold hover:underline">reredos@naver.com</a></span>
                     </div>
                     <div className="flex items-center space-x-2 text-xs sm:text-sm text-slate-600">
                       <MapPin size={15} className="text-slate-400 shrink-0" />

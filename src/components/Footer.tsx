@@ -87,7 +87,7 @@ export default function Footer({ designSettings }: FooterProps) {
 
               <li className="flex items-center space-x-2.5">
                 <Mail size={15} className="text-[#FFD700] shrink-0" />
-                <span>이메일: <a href="mailto:reredos123@gmail.com" className="text-[#FFD700] hover:underline">reredos123@gmail.com</a></span>
+                <span>이메일: <a href="mailto:reredos@naver.com" className="text-[#FFD700] hover:underline">reredos@naver.com</a></span>
               </li>
             </ul>
           </div>

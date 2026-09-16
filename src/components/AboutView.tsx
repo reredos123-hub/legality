@@ -109,8 +109,8 @@ export default function AboutView({ pageContent, designSettings }: AboutViewProp
                   <Mail size={16} className="text-[#FFD700] mt-1 shrink-0" />
                   <div>
                     <p className="font-semibold text-white">이메일</p>
-                    <a href={`mailto:${content.email || 'reredos123@gmail.com'}`} className="mt-0.5 text-[#FFD700] hover:underline block break-all font-mono font-medium">
-                      {content.email || 'reredos123@gmail.com'}
+                    <a href={`mailto:${content.email || 'reredos@naver.com'}`} className="mt-0.5 text-[#FFD700] hover:underline block break-all font-mono font-medium">
+                      {content.email || 'reredos@naver.com'}
                     </a>
                   </div>
                 </div>
