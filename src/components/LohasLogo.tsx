@@ -16,143 +16,112 @@ export function LohasLogo({ className = '', size = 32 }: LohasLogoProps) {
       className={`${className} transition-transform duration-300 hover:scale-105`}
     >
       <defs>
-        {/* Gradients for modern flat-roof cantilever slabs */}
-        <linearGradient id="lohasMainSlabGrad" x1="42" y1="22" x2="86" y2="28" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#FFA043" />
-          <stop offset="50%" stopColor="#FFD700" />
-          <stop offset="100%" stopColor="#F97316" />
-        </linearGradient>
-
-        <linearGradient id="lohasSideSlabGrad" x1="20" y1="44" x2="108" y2="44" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#EA580C" />
-          <stop offset="100%" stopColor="#F97316" />
-        </linearGradient>
-
-        {/* Foundation beam gold gradient */}
-        <linearGradient id="lohasGoldGrad" x1="18" y1="94" x2="110" y2="94" gradientUnits="userSpaceOnUse">
+        {/* Gold gradient for architectural cantilever slabs and plinth */}
+        <linearGradient id="lohasGoldGrad" x1="14" y1="92" x2="114" y2="92" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="#D97706" />
           <stop offset="50%" stopColor="#FFD700" />
           <stop offset="100%" stopColor="#D97706" />
         </linearGradient>
 
-        {/* Vertical curtain wall glass gradient */}
-        <linearGradient id="lohasGlassGrad" x1="45" y1="28" x2="83" y2="92" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#2A1205" />
-          <stop offset="100%" stopColor="#140700" />
+        {/* Warm luminous glow for panoramic ribbon windows */}
+        <linearGradient id="lohasWindowGlow" x1="26" y1="37" x2="78" y2="54" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FFE066" />
+          <stop offset="50%" stopColor="#FFB703" />
+          <stop offset="100%" stopColor="#FB8500" />
         </linearGradient>
 
-        {/* Background glow gradient */}
-        <radialGradient id="lohasBgGlow" cx="64" cy="58" r="50" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#F97316" stopOpacity="0.22" />
-          <stop offset="100%" stopColor="#150B04" stopOpacity="0" />
+        {/* Atrium ground glass gradient */}
+        <linearGradient id="lohasAtriumGlow" x1="48" y1="64" x2="98" y2="90" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FFD166" />
+          <stop offset="100%" stopColor="#F77F00" />
+        </linearGradient>
+
+        {/* Structural pilotis column gradient */}
+        <linearGradient id="lohasColumnGrad" x1="0" y1="60" x2="0" y2="92" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FFF7ED" stopOpacity="0.95" />
+          <stop offset="100%" stopColor="#FED7AA" stopOpacity="0.6" />
+        </linearGradient>
+
+        {/* Ambient warm background glow */}
+        <radialGradient id="lohasAmbientGlow" cx="64" cy="54" r="52" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#F97316" stopOpacity="0.25" />
+          <stop offset="100%" stopColor="#140A03" stopOpacity="0" />
         </radialGradient>
       </defs>
 
-      {/* Dark architectural badge background */}
-      <rect width="128" height="128" rx="28" fill="#150B04" />
-      <circle cx="64" cy="58" r="50" fill="url(#lohasBgGlow)" />
+      {/* Dark architectural badge canvas */}
+      <rect width="128" height="128" rx="28" fill="#140A03" />
+      <circle cx="64" cy="54" r="52" fill="url(#lohasAmbientGlow)" />
       <rect x="1" y="1" width="126" height="126" rx="27" stroke="#F97316" strokeOpacity="0.3" strokeWidth="1.5" />
 
-      {/* Blueprint architectural drafting axes (Horizontal and Vertical only, zero diagonal) */}
-      <circle cx="64" cy="58" r="52" stroke="#EA580C" strokeWidth="1" strokeDasharray="3 3" opacity="0.2" />
-      <line x1="64" y1="10" x2="64" y2="16" stroke="#F97316" strokeWidth="1.5" strokeOpacity="0.45" strokeLinecap="round" />
-      <line x1="10" y1="92" x2="18" y2="92" stroke="#F97316" strokeWidth="1.5" strokeOpacity="0.4" />
-      <line x1="110" y1="92" x2="118" y2="92" stroke="#F97316" strokeWidth="1.5" strokeOpacity="0.4" />
+      {/* Blueprint drafting precision coordinates (Orthogonal only) */}
+      <circle cx="64" cy="54" r="50" stroke="#EA580C" strokeWidth="1" strokeDasharray="3 3" opacity="0.2" />
+      <line x1="64" y1="8" x2="64" y2="15" stroke="#F97316" strokeWidth="1.5" strokeOpacity="0.45" strokeLinecap="round" />
+      <line x1="8" y1="92" x2="14" y2="92" stroke="#F97316" strokeWidth="1.5" strokeOpacity="0.4" />
+      <line x1="114" y1="92" x2="120" y2="92" stroke="#F97316" strokeWidth="1.5" strokeOpacity="0.4" />
+      <path d="M14 22H20M17 19V25" stroke="#F97316" strokeWidth="1" strokeOpacity="0.35" strokeLinecap="round" />
+      <path d="M108 22H114M111 19V25" stroke="#F97316" strokeWidth="1" strokeOpacity="0.35" strokeLinecap="round" />
+
+      {/* ===== CONTEMPORARY MODERN ARCHITECTURE MASSING ===== */}
+
+      {/* 1. Vertical Core Tower (Back Right) */}
+      <rect x="74" y="20" width="28" height="72" rx="2" fill="#240D02" stroke="#682405" strokeWidth="1" />
+      {/* Tower Top Accent Cap */}
+      <rect x="72" y="18" width="32" height="3" rx="1.5" fill="#FFD700" />
+      {/* Vertical Architectural Light Louvers on Tower */}
+      <line x1="81" y1="26" x2="81" y2="58" stroke="#F97316" strokeWidth="1.8" strokeOpacity="0.75" strokeLinecap="round" />
+      <line x1="88" y1="24" x2="88" y2="58" stroke="#FFD700" strokeWidth="2" strokeOpacity="0.9" strokeLinecap="round" />
+      <line x1="95" y1="26" x2="95" y2="58" stroke="#F97316" strokeWidth="1.8" strokeOpacity="0.75" strokeLinecap="round" />
+
+      {/* 2. Rooftop Modern Pergola / Trellis (Over Upper Cantilever) */}
+      <rect x="26" y="22" width="34" height="2" rx="1" fill="#FFD700" />
+      <rect x="29" y="24" width="2" height="7" rx="0.8" fill="#FFB703" />
+      <rect x="37" y="24" width="2" height="7" rx="0.8" fill="#FFB703" />
+      <rect x="45" y="24" width="2" height="7" rx="0.8" fill="#FFB703" />
+      <rect x="53" y="24" width="2" height="7" rx="0.8" fill="#FFB703" />
+
+      {/* 3. Floating Upper Cantilevered Pavilion (Modernist Living/Design Studio) */}
+      {/* Upper Roof Cantilever Slab */}
+      <rect x="18" y="29.5" width="68" height="3.5" rx="1.5" fill="url(#lohasGoldGrad)" />
       
-      {/* Precision coordinate crosshairs */}
-      <path d="M14 24H20M17 21V27" stroke="#F97316" strokeWidth="1" strokeOpacity="0.35" strokeLinecap="round" />
-      <path d="M108 24H114M111 21V27" stroke="#F97316" strokeWidth="1" strokeOpacity="0.35" strokeLinecap="round" />
+      {/* Upper Main Box Body */}
+      <rect x="21" y="32" width="62" height="27" rx="1.5" fill="#381504" stroke="#8C3209" strokeWidth="1" />
 
-      {/* ===== MODERN RECTILINEAR ARCHITECTURAL MASSING (NO TRIANGLES) ===== */}
+      {/* Modern Panoramic Ribbon Window (Continuous Glass Band) */}
+      <rect x="25" y="37" width="54" height="16" rx="1.5" fill="url(#lohasWindowGlow)" />
+      {/* Minimalist Vertical Mullions */}
+      <line x1="38.5" y1="37" x2="38.5" y2="53" stroke="#240D02" strokeWidth="1.5" strokeOpacity="0.55" />
+      <line x1="52" y1="37" x2="52" y2="53" stroke="#240D02" strokeWidth="1.5" strokeOpacity="0.55" />
+      <line x1="65.5" y1="37" x2="65.5" y2="53" stroke="#240D02" strokeWidth="1.5" strokeOpacity="0.55" />
 
-      {/* Rooftop Crown / Mechanical Fin & Louver */}
-      <rect x="63" y="14" width="2" height="6" rx="1" fill="#FFD700" />
-      <rect x="53" y="19" width="22" height="3" rx="1" fill="#D97706" />
+      {/* Lower Cantilever Floor Slab */}
+      <rect x="19" y="58" width="66" height="3" rx="1.5" fill="#EA580C" />
 
-      {/* --- 1. Left Stepped Architectural Wing --- */}
-      {/* Left Wing Roof Slab */}
-      <rect x="20" y="44" width="25" height="3.5" rx="1" fill="url(#lohasSideSlabGrad)" />
-      {/* Left Wing Main Body */}
-      <rect x="22" y="47.5" width="23" height="44.5" fill="#7C2D12" stroke="#431407" strokeWidth="1" />
-      {/* Left Wing Floor Slabs */}
-      <rect x="22" y="62" width="23" height="2" fill="#9A3412" />
-      <rect x="22" y="77" width="23" height="2" fill="#9A3412" />
-      {/* Left Windows (Orthogonal Grid) */}
-      <rect x="26" y="52" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.8" />
-      <rect x="35" y="52" width="6" height="7" rx="1" fill="#FFD700" opacity="0.9" />
-      <rect x="26" y="67" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.75" />
-      <rect x="35" y="67" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.75" />
-      <rect x="26" y="81.5" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.7" />
-      <rect x="35" y="81.5" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.7" />
+      {/* 4. Open Pilotis Space (Under the dramatic left cantilever) */}
+      {/* Pilotis Recessed Shadow Void */}
+      <rect x="23" y="60" width="22" height="32" fill="#0D0501" opacity="0.6" />
+      {/* 2 Structural Modern Pilotis Columns */}
+      <rect x="27" y="60" width="3.5" height="32" rx="1.5" fill="url(#lohasColumnGrad)" />
+      <rect x="37" y="60" width="3.5" height="32" rx="1.5" fill="url(#lohasColumnGrad)" />
 
-      {/* --- 2. Right Stepped Architectural Wing --- */}
-      {/* Right Wing Roof Slab */}
-      <rect x="83" y="44" width="25" height="3.5" rx="1" fill="url(#lohasSideSlabGrad)" />
-      {/* Right Wing Main Body */}
-      <rect x="83" y="47.5" width="23" height="44.5" fill="#9A3412" stroke="#431407" strokeWidth="1" />
-      {/* Right Wing Floor Slabs */}
-      <rect x="83" y="62" width="23" height="2" fill="#B45309" />
-      <rect x="83" y="77" width="23" height="2" fill="#B45309" />
-      {/* Right Windows (Orthogonal Grid) */}
-      <rect x="87" y="52" width="6" height="7" rx="1" fill="#FFD700" opacity="0.9" />
-      <rect x="96" y="52" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.8" />
-      <rect x="87" y="67" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.75" />
-      <rect x="96" y="67" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.75" />
-      <rect x="87" y="81.5" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.7" />
-      <rect x="96" y="81.5" width="6" height="7" rx="1" fill="#FFB74D" opacity="0.7" />
+      {/* 5. Ground Level Glass Atrium & Gallery (Right Pavilion) */}
+      <rect x="45" y="60" width="56" height="32" rx="1.5" fill="#1F0B02" stroke="#682405" strokeWidth="1" />
+      {/* Floor-to-ceiling Glowing Glass Lobby */}
+      <rect x="48" y="64" width="50" height="26" rx="1" fill="url(#lohasAtriumGlow)" />
+      {/* Atrium Horizontal Transom */}
+      <line x1="48" y1="72" x2="98" y2="72" stroke="#1F0B02" strokeWidth="1.5" strokeOpacity="0.6" />
+      {/* Atrium Vertical Mullions */}
+      <line x1="61" y1="64" x2="61" y2="90" stroke="#1F0B02" strokeWidth="1.5" strokeOpacity="0.6" />
+      <line x1="74" y1="64" x2="74" y2="90" stroke="#1F0B02" strokeWidth="1.5" strokeOpacity="0.6" />
+      {/* Entrance Door Frame Accent */}
+      <rect x="80" y="73" width="15" height="17" fill="#140701" opacity="0.35" />
+      <rect x="76" y="71" width="22" height="2.5" rx="1" fill="#FFD700" />
 
-      {/* --- 3. Center Main Architectural Tower & Pavilion --- */}
-      {/* Cantilever Flat Roof Top Slab */}
-      <rect x="41" y="22" width="46" height="4.5" rx="1.5" fill="url(#lohasMainSlabGrad)" />
-      <rect x="46" y="26.5" width="36" height="1.5" fill="#B45309" />
+      {/* 6. Foundation Plinth & Datum Beam */}
+      <rect x="14" y="92" width="100" height="3.5" rx="1.75" fill="url(#lohasGoldGrad)" />
+      <rect x="24" y="96" width="80" height="2" rx="1" fill="#F97316" opacity="0.65" />
 
-      {/* Central Tower Mass / Glass Curtain Wall */}
-      <rect x="44" y="28" width="40" height="64" fill="url(#lohasGlassGrad)" stroke="#C2410C" strokeWidth="1.2" />
-
-      {/* Horizontal Story Slabs (Curtain wall floor plates) */}
-      <rect x="44" y="43" width="40" height="2.5" fill="#EA580C" />
-      <rect x="44" y="58" width="40" height="2.5" fill="#EA580C" />
-      <rect x="44" y="73" width="40" height="2.5" fill="#EA580C" />
-
-      {/* Vertical Structural Mullions / Columns */}
-      <rect x="52" y="28" width="2.5" height="45" fill="#FFEDD5" opacity="0.85" />
-      <rect x="63" y="28" width="2" height="45" fill="#FFD700" opacity="0.9" />
-      <rect x="73" y="28" width="2.5" height="45" fill="#FFEDD5" opacity="0.85" />
-
-      {/* Luminous Office Windows (Warm architectural illumination) */}
-      {/* 4th Floor */}
-      <rect x="46" y="32" width="4.5" height="8" rx="0.5" fill="#FFD700" opacity="0.85" />
-      <rect x="56" y="32" width="5.5" height="8" rx="0.5" fill="#FFA043" opacity="0.85" />
-      <rect x="66.5" y="32" width="5" height="8" rx="0.5" fill="#FFA043" opacity="0.85" />
-      <rect x="77" y="32" width="5.5" height="8" rx="0.5" fill="#FFD700" opacity="0.85" />
-
-      {/* 3rd Floor */}
-      <rect x="46" y="47" width="4.5" height="8" rx="0.5" fill="#FFA043" opacity="0.8" />
-      <rect x="56" y="47" width="5.5" height="8" rx="0.5" fill="#FFD700" opacity="0.9" />
-      <rect x="66.5" y="47" width="5" height="8" rx="0.5" fill="#FFD700" opacity="0.9" />
-      <rect x="77" y="47" width="5.5" height="8" rx="0.5" fill="#FFA043" opacity="0.8" />
-
-      {/* 2nd Floor */}
-      <rect x="46" y="62" width="4.5" height="8" rx="0.5" fill="#FFA043" opacity="0.85" />
-      <rect x="56" y="62" width="5.5" height="8" rx="0.5" fill="#FFB74D" opacity="0.8" />
-      <rect x="66.5" y="62" width="5" height="8" rx="0.5" fill="#FFB74D" opacity="0.8" />
-      <rect x="77" y="62" width="5.5" height="8" rx="0.5" fill="#FFA043" opacity="0.85" />
-
-      {/* --- 4. Ground Floor Modern Entrance & Canopy --- */}
-      {/* Flat Entrance Canopy Slab */}
-      <rect x="50" y="74" width="28" height="3" rx="1" fill="#FFD700" />
-      {/* Illuminated Golden Lobby / Portal (Strictly rectangular) */}
-      <rect x="54" y="77" width="20" height="15" rx="1" fill="#FFB703" />
-      {/* Modern Glass Entrance Split Door Frame */}
-      <rect x="56" y="79" width="7" height="13" fill="#1C0A00" opacity="0.5" />
-      <rect x="65" y="79" width="7" height="13" fill="#1C0A00" opacity="0.5" />
-      <line x1="64" y1="77" x2="64" y2="92" stroke="#D97706" strokeWidth="1.5" />
-
-      {/* --- 5. Foundation Base Plinth --- */}
-      <rect x="18" y="92" width="92" height="4" rx="2" fill="url(#lohasGoldGrad)" />
-      <rect x="26" y="96" width="76" height="2" rx="1" fill="#F97316" opacity="0.65" />
-
-      {/* Modernist Architectural Firm Typography */}
+      {/* 7. Distinctive Architectural Office Typography */}
       <text 
         x="64" 
         y="113" 
@@ -160,7 +129,7 @@ export function LohasLogo({ className = '', size = 32 }: LohasLogoProps) {
         fontSize="12.5" 
         fontWeight="900" 
         textAnchor="middle" 
-        letterSpacing="3.5"
+        letterSpacing="4"
         style={{
           fontFamily: '"Outfit", "Inter", "system-ui", sans-serif',
           textShadow: '0 2px 4px rgba(0, 0, 0, 0.85)'

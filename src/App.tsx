@@ -704,6 +704,7 @@ export default function App() {
           onRefreshData={initApp}
           initialTab={adminInitialTab}
           initialNoticeIdToEdit={adminInitialNoticeId}
+          initialNotices={notices}
         />
       )}
 

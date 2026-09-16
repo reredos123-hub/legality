@@ -239,20 +239,31 @@ export function getNoticesFromHtmlDocument(): Notice[] | null {
   return null;
 }
 
-// Retrieve notices from local storage cache, preserving any user modifications
+// Memory cache for sub-millisecond notice access
+let inMemoryNoticesCache: Notice[] | null = null;
+let lastNoticesFetchTime = 0;
+const NOTICES_CACHE_TTL = 30000; // 30 seconds
+
+// Retrieve notices from memory or local storage cache, preserving any user modifications
 export function getStoredNotices(): Notice[] {
+  if (inMemoryNoticesCache && inMemoryNoticesCache.length > 0) {
+    return inMemoryNoticesCache;
+  }
+
   if (typeof window === 'undefined') return DEFAULT_NOTICES;
   
   const cachedJson = localStorage.getItem('lohas_cache_notices');
   if (cachedJson !== null) {
     try {
       const parsed = JSON.parse(cachedJson) as Notice[];
-      if (Array.isArray(parsed)) {
-        return parsed.map(n => ({
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const mapped = parsed.map(n => ({
           ...n,
           createdAt: n.createdAt ? new Date(n.createdAt) : new Date(),
           updatedAt: n.updatedAt ? new Date(n.updatedAt) : new Date()
         }));
+        inMemoryNoticesCache = mapped;
+        return mapped;
       }
     } catch (e) {
       console.warn('Failed to parse cached notices:', e);
@@ -261,6 +272,8 @@ export function getStoredNotices(): Notice[] {
 
   const htmlNotices = getNoticesFromHtmlDocument();
   const initialList = htmlNotices && htmlNotices.length > 0 ? htmlNotices : DEFAULT_NOTICES;
+
+  inMemoryNoticesCache = initialList;
 
   // If no cache exists, initialize with HTML or DEFAULT_NOTICES
   try {
@@ -271,6 +284,8 @@ export function getStoredNotices(): Notice[] {
 
 // Save notices to local cache and notify active UI components
 export function saveNoticesToCache(notices: Notice[]) {
+  inMemoryNoticesCache = notices;
+  lastNoticesFetchTime = Date.now();
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem('lohas_cache_notices', JSON.stringify(notices));
@@ -629,22 +644,35 @@ export async function updatePageContent(id: 'home' | 'about' | 'guide', data: Pa
   }
 }
 
-// Fetch Notices (checks Firestore, falls back to local cache/DEFAULT_NOTICES, keeps them synced)
-export async function fetchNotices(): Promise<Notice[]> {
+// Fetch Notices (checks in-memory cache first for instant 0ms rendering, syncs with Firestore)
+export async function fetchNotices(forceFresh = false): Promise<Notice[]> {
   const localList = getStoredNotices();
+
+  // If memory cache is fresh (< 30s) and not forced, return immediately for sub-millisecond response
+  if (!forceFresh && inMemoryNoticesCache && inMemoryNoticesCache.length > 0 && (Date.now() - lastNoticesFetchTime < NOTICES_CACHE_TTL)) {
+    return inMemoryNoticesCache;
+  }
 
   try {
     const noticesRef = collection(db, 'notices');
-    let snap;
-    try {
-      const q = query(noticesRef, orderBy('createdAt', 'desc'));
-      snap = await getDocs(q);
-    } catch (queryErr) {
-      console.warn('Fallback fetching notices without orderBy query:', queryErr);
-      snap = await getDocs(noticesRef);
-    }
+    
+    // Fast query with timeout fallback to ensure UI never freezes
+    const fetchDocsPromise = (async () => {
+      try {
+        const q = query(noticesRef, orderBy('createdAt', 'desc'));
+        return await getDocs(q);
+      } catch {
+        return await getDocs(noticesRef);
+      }
+    })();
 
-    if (!snap.empty) {
+    const timeoutPromise = new Promise<never>((_, reject) => 
+      setTimeout(() => reject(new Error('Firestore timeout')), 2000)
+    );
+
+    const snap = await Promise.race([fetchDocsPromise, timeoutPromise]);
+
+    if (snap && !snap.empty) {
       const list: Notice[] = [];
       snap.forEach(docSnap => {
         const data = docSnap.data();
@@ -684,7 +712,7 @@ export async function fetchNotices(): Promise<Notice[]> {
       return list;
     }
   } catch (error) {
-    console.warn('Firestore fetchNotices warning (using local/deployed notices):', error);
+    // On timeout or error, instant fallback to cached notices
   }
 
   return localList;

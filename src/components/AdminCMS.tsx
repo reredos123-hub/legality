@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   BarChart2, 
   FileText, 
@@ -116,9 +116,17 @@ interface AdminCMSProps {
   onRefreshData: () => void;
   initialTab?: 'stats' | 'notices' | 'pages' | 'design' | 'seo' | 'media';
   initialNoticeIdToEdit?: string | null;
+  initialNotices?: Notice[];
 }
 
-export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialTab, initialNoticeIdToEdit }: AdminCMSProps) {
+export default function AdminCMS({ 
+  adminEmail, 
+  onLogout, 
+  onRefreshData, 
+  initialTab, 
+  initialNoticeIdToEdit,
+  initialNotices 
+}: AdminCMSProps) {
   const [activeTab, setActiveTab] = useState<'stats' | 'notices' | 'pages' | 'design' | 'seo' | 'media'>(initialTab || 'stats');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -158,7 +166,11 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
   const [isUploadingNoticeImage, setIsUploadingNoticeImage] = useState(false);
   const [noticeDragActive, setNoticeDragActive] = useState(false);
 
-  const [notices, setNotices] = useState<Notice[]>([]);
+  // Instantly initialize notices with 0ms delay from props or memory/localStorage
+  const [notices, setNotices] = useState<Notice[]>(() => {
+    if (initialNotices && initialNotices.length > 0) return initialNotices;
+    return getStoredNotices();
+  });
   const [noticeSearch, setNoticeSearch] = useState('');
   const [editingNotice, setEditingNotice] = useState<Notice | null>(null);
   const [isCreatingNotice, setIsCreatingNotice] = useState(false);
@@ -199,87 +211,124 @@ export default function AdminCMS({ adminEmail, onLogout, onRefreshData, initialT
   const [mediaUploadSize, setMediaUploadSize] = useState('245 KB');
   const [dragActive, setDragActive] = useState(false);
 
-  // Load Data
+  // Sync with global cache events
+  useEffect(() => {
+    const handleNoticesUpdate = (e: any) => {
+      if (e.detail && Array.isArray(e.detail) && e.detail.length > 0) {
+        setNotices(e.detail);
+      }
+    };
+    window.addEventListener('lohas_notices_updated', handleNoticesUpdate);
+    return () => window.removeEventListener('lohas_notices_updated', handleNoticesUpdate);
+  }, []);
+
+  // Sync if initialNotices prop changes and current is empty
+  useEffect(() => {
+    if (initialNotices && initialNotices.length > 0 && notices.length === 0) {
+      setNotices(initialNotices);
+    }
+  }, [initialNotices]);
+
+  // Load Data concurrently for ultra-fast response
   const loadCMSData = async () => {
     try {
-      // Load stats
-      const s = await fetchVisitorStats();
-      setStats(s);
+      const [s, seo, des, hp, ap, gp, nt, md] = await Promise.all([
+        fetchVisitorStats().catch(err => { console.warn('VisitorStats failed:', err); return null; }),
+        fetchSEOSettings().catch(err => { console.warn('SEO failed:', err); return { title: '', description: '', keywords: '', ogImage: '' }; }),
+        fetchDesignSettings().catch(err => { console.warn('Design failed:', err); return {} as any; }),
+        fetchPageContent('home').catch(err => { console.warn('Home page failed:', err); return { content: null } as any; }),
+        fetchPageContent('about').catch(err => { console.warn('About page failed:', err); return { content: null } as any; }),
+        fetchPageContent('guide').catch(err => { console.warn('Guide page failed:', err); return { content: null } as any; }),
+        fetchNotices().catch(() => getStoredNotices()),
+        fetchMediaItems().catch(err => { console.warn('Media failed:', err); return []; })
+      ]);
 
-      // Load SEO
-      const seo = await fetchSEOSettings();
-      setSeoForm({
-        title: seo.title,
-        description: seo.description,
-        keywords: seo.keywords,
-        ogImage: seo.ogImage
-      });
+      if (s) setStats(s);
 
-      // Load Design
-      const des = await fetchDesignSettings();
-      setDesignForm({
-        primaryColor: des.primaryColor || '#0F172A',
-        accentColor: des.accentColor || '#FFD700',
-        fontFamily: des.fontFamily || 'Pretendard',
-        logoText: des.logoText || 'Lohas Architecture',
-        heroTitle: des.heroTitle || '',
-        heroSubtitle: des.heroSubtitle || '',
-        heroImageUrl: des.heroImageUrl || '',
-        menuOrder: des.menuOrder || ['홈', '회사소개', '양성화 안내', '공지사항', '양성화 검토 신청']
-      });
+      if (seo) {
+        setSeoForm({
+          title: seo.title || '',
+          description: seo.description || '',
+          keywords: seo.keywords || '',
+          ogImage: seo.ogImage || ''
+        });
+      }
 
-      // Load page contents
-      const hp = await fetchPageContent('home');
-      setHomePageForm(hp.content);
+      if (des) {
+        setDesignForm({
+          primaryColor: des.primaryColor || '#0F172A',
+          accentColor: des.accentColor || '#FFD700',
+          fontFamily: des.fontFamily || 'Pretendard',
+          logoText: des.logoText || 'Lohas Architecture',
+          heroTitle: des.heroTitle || '',
+          heroSubtitle: des.heroSubtitle || '',
+          heroImageUrl: des.heroImageUrl || '',
+          menuOrder: des.menuOrder || ['홈', '회사소개', '양성화 안내', '공지사항', '양성화 검토 신청']
+        });
+      }
 
-      const ap = await fetchPageContent('about');
-      setAboutPageForm(ap.content);
+      if (hp?.content) setHomePageForm(hp.content);
+      if (ap?.content) setAboutPageForm(ap.content);
+      if (gp?.content) setGuidePageForm(gp.content);
 
-      const gp = await fetchPageContent('guide');
-      setGuidePageForm(gp.content);
+      if (nt && nt.length > 0) {
+        setNotices(nt);
 
-      // Load notices
-      const nt = await fetchNotices();
-      setNotices(nt);
-
-      if (initialNoticeIdToEdit) {
-        const found = nt.find(n => n.id === initialNoticeIdToEdit);
-        if (found) {
-          setActiveTab('notices');
-          setEditingNotice(found);
-          const cat = found.category || '양성화안내';
-          const standardCats = ['양성화안내', '소식', '건축법령', '자주묻는질문', '보도자료'];
-          const isStd = standardCats.includes(cat);
-          let dateStr = '';
-          if (found.createdAt) {
-            const d = new Date(found.createdAt);
-            if (!isNaN(d.getTime())) {
-              dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        if (initialNoticeIdToEdit) {
+          const found = nt.find(n => n.id === initialNoticeIdToEdit);
+          if (found) {
+            setActiveTab('notices');
+            setEditingNotice(found);
+            const cat = found.category || '양성화안내';
+            const standardCats = ['양성화안내', '소식', '건축법령', '자주묻는질문', '보도자료'];
+            const isStd = standardCats.includes(cat);
+            let dateStr = '';
+            if (found.createdAt) {
+              const d = new Date(found.createdAt);
+              if (!isNaN(d.getTime())) {
+                dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+              }
             }
+            setNoticeForm({
+              title: found.title,
+              content: found.content,
+              category: isStd ? cat : '직접입력',
+              published: found.published !== false,
+              isPinned: !!found.isPinned,
+              imageUrl: found.imageUrl || '',
+              createdAtDate: dateStr
+            });
+            setIsCustomCategory(!isStd);
+            setCustomCategory(isStd ? '' : cat);
+            setPreviewNoticeMode(false);
+            setIsCreatingNotice(true);
           }
-          setNoticeForm({
-            title: found.title,
-            content: found.content,
-            category: isStd ? cat : '직접입력',
-            published: found.published !== false,
-            isPinned: !!found.isPinned,
-            imageUrl: found.imageUrl || '',
-            createdAtDate: dateStr
-          });
-          setIsCustomCategory(!isStd);
-          setCustomCategory(isStd ? '' : cat);
-          setPreviewNoticeMode(false);
-          setIsCreatingNotice(true);
         }
       }
 
-      // Load media
-      const md = await fetchMediaItems();
-      setMediaItems(md);
+      if (md) setMediaItems(md);
 
     } catch (err) {
       console.warn('Failed to load CMS data:', err);
     }
+  };
+
+  // Instant handler for clicking notices tab
+  const handleSelectNoticesTab = () => {
+    setActiveTab('notices');
+    // Instant fallback if empty
+    if (!notices || notices.length === 0) {
+      const stored = getStoredNotices();
+      if (stored && stored.length > 0) {
+        setNotices(stored);
+      }
+    }
+    // Asynchronously refresh without locking UI
+    fetchNotices().then(latest => {
+      if (latest && latest.length > 0) {
+        setNotices(latest);
+      }
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -876,16 +925,26 @@ ${noscriptArticles}
     }
   };
 
-  // Filter notices for search (pinned items first)
-  const filteredNotices = notices.filter(n => 
-    n.title.toLowerCase().includes(noticeSearch.toLowerCase()) ||
-    n.content.toLowerCase().includes(noticeSearch.toLowerCase())
-  ).sort((a, b) => {
-    if (!!a.isPinned !== !!b.isPinned) {
-      return a.isPinned ? -1 : 1;
-    }
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  });
+  // Filter notices for search (pinned items first, memoized for instant response)
+  const filteredNotices = useMemo(() => {
+    const q = noticeSearch.trim().toLowerCase();
+    const list = q
+      ? notices.filter(n => 
+          (n.title && n.title.toLowerCase().includes(q)) ||
+          (n.content && n.content.toLowerCase().includes(q)) ||
+          (n.category && n.category.toLowerCase().includes(q))
+        )
+      : notices;
+
+    return [...list].sort((a, b) => {
+      if (!!a.isPinned !== !!b.isPinned) {
+        return a.isPinned ? -1 : 1;
+      }
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [notices, noticeSearch]);
 
   return (
     <div id="admin-cms-panel" className="bg-slate-900 text-slate-100 min-h-screen pt-24 pb-16">
@@ -949,7 +1008,8 @@ ${noscriptArticles}
             </button>
 
             <button
-              onClick={() => setActiveTab('notices')}
+              onClick={handleSelectNoticesTab}
+              onMouseEnter={() => { getStoredNotices(); }}
               className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-left text-sm font-semibold transition-all cursor-pointer ${
                 activeTab === 'notices' 
                   ? 'bg-amber-600 text-white shadow-md' 
@@ -960,7 +1020,18 @@ ${noscriptArticles}
                 <FileText size={16} />
                 <span>공지사항 관리</span>
               </div>
-              <ChevronRight size={14} className="opacity-50" />
+              <div className="flex items-center space-x-1.5">
+                {notices.length > 0 && (
+                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded-full ${
+                    activeTab === 'notices'
+                      ? 'bg-amber-800/80 text-amber-100'
+                      : 'bg-slate-800 text-slate-300'
+                  }`}>
+                    {notices.length}
+                  </span>
+                )}
+                <ChevronRight size={14} className="opacity-50" />
+              </div>
             </button>
 
             <button
