@@ -109,7 +109,7 @@ export default function Hero({ designSettings, onContactClick }: HeroProps) {
           </div>
           <div className="p-4 glass-card rounded-2xl border border-[#FFD700]/20 hover:border-[#FFD700]/40 transition-all">
             <p className="text-[#FFD700] font-black text-xl sm:text-2xl font-sans drop-shadow-[0_0_10px_rgba(255,215,0,0.4)]">신속</p>
-            <p className="text-slate-300 text-xs sm:text-sm mt-1 font-medium">지자체 밀착 행정 협력</p>
+            <p className="text-slate-300 text-xs sm:text-sm mt-1 font-medium">신속한 행정처리</p>
           </div>
         </div>
       </div>
