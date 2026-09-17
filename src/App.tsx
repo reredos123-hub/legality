@@ -153,7 +153,7 @@ export default function App() {
         }
         metaDesc.setAttribute('content', seo.description);
       }
-      if (list && list.length > 0) {
+      if (Array.isArray(list)) {
         setNotices(list);
         try { localStorage.setItem('lohas_cache_notices', JSON.stringify(list)); } catch {}
       }

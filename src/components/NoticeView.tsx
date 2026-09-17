@@ -141,9 +141,30 @@ export default function NoticeView({ notices, designSettings }: NoticeViewProps)
             ))}
           </div>
         ) : (
-          <div className="glass-card rounded-2xl border border-white/10 p-12 text-center text-slate-400">
-            <BookOpen size={48} className="mx-auto text-[#FFD700]/40 mb-4 stroke-1" />
-            <p className="text-sm">검색 결과가 없거나 게시물이 비어 있습니다.</p>
+          <div className="glass-card rounded-2xl border border-white/10 p-12 sm:p-16 text-center text-slate-400 space-y-4 max-w-xl mx-auto">
+            <div className="w-16 h-16 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center mx-auto text-[#FFD700]">
+              <BookOpen size={32} className="stroke-1 text-[#FFD700]" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white mb-1.5">
+                {searchTerm ? '검색 결과가 없습니다' : '현재 등록된 공지사항이 없습니다'}
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
+                {searchTerm 
+                  ? `'${searchTerm}'에 해당하는 공지사항을 찾을 수 없습니다. 다른 검색어를 입력해 보세요.`
+                  : '새로운 안내 사항 및 소식이 등록되면 이곳에 신속하게 게시됩니다.'}
+              </p>
+            </div>
+            {!searchTerm && (
+              <div className="pt-2">
+                <a
+                  href="tel:02-499-0229"
+                  className="inline-flex items-center space-x-2 px-5 py-2.5 rounded-full bg-[#FFD700]/10 hover:bg-[#FFD700]/20 text-[#FFD700] text-xs font-bold border border-[#FFD700]/30 transition-colors cursor-pointer"
+                >
+                  <span>1:1 전화 상담 문의: 02-499-0229</span>
+                </a>
+              </div>
+            )}
           </div>
         )}
 

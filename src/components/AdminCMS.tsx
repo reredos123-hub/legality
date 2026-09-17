@@ -33,7 +33,9 @@ import {
   Download,
   Pin,
   Calendar,
-  RotateCw
+  RotateCw,
+  AlertTriangle,
+  CopyPlus
 } from 'lucide-react';
 import { 
   Notice, 
@@ -202,6 +204,21 @@ export default function AdminCMS({
   const [customCategory, setCustomCategory] = useState('');
   const [isCustomCategory, setIsCustomCategory] = useState(false);
   const [previewNoticeMode, setPreviewNoticeMode] = useState(false);
+  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('전체');
+
+  // Dedicated in-app confirmation modal states
+  const [noticeToDelete, setNoticeToDelete] = useState<{ id: string; title: string } | null>(null);
+  const [isConfirmResetNoticesOpen, setIsConfirmResetNoticesOpen] = useState(false);
+  const [isConfirmClearNoticesOpen, setIsConfirmClearNoticesOpen] = useState(false);
+  const [toastNotification, setToastNotification] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  // Floating Toast Notification Helper
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToastNotification({ message, type });
+    setTimeout(() => {
+      setToastNotification(prev => (prev?.message === message ? null : prev));
+    }, 3500);
+  };
 
   // Media states
   const mediaFileInputRef = useRef<HTMLInputElement>(null);
@@ -211,10 +228,13 @@ export default function AdminCMS({
   const [mediaUploadSize, setMediaUploadSize] = useState('245 KB');
   const [dragActive, setDragActive] = useState(false);
 
+  // Track if notices have been loaded
+  const noticesLoadedRef = useRef(false);
+
   // Sync with global cache events
   useEffect(() => {
     const handleNoticesUpdate = (e: any) => {
-      if (e.detail && Array.isArray(e.detail) && e.detail.length > 0) {
+      if (e.detail && Array.isArray(e.detail)) {
         setNotices(e.detail);
       }
     };
@@ -222,10 +242,11 @@ export default function AdminCMS({
     return () => window.removeEventListener('lohas_notices_updated', handleNoticesUpdate);
   }, []);
 
-  // Sync if initialNotices prop changes and current is empty
+  // Sync if initialNotices prop changes and not yet initialized
   useEffect(() => {
-    if (initialNotices && initialNotices.length > 0 && notices.length === 0) {
+    if (!noticesLoadedRef.current && initialNotices && initialNotices.length > 0) {
       setNotices(initialNotices);
+      noticesLoadedRef.current = true;
     }
   }, [initialNotices]);
 
@@ -271,8 +292,9 @@ export default function AdminCMS({
       if (ap?.content) setAboutPageForm(ap.content);
       if (gp?.content) setGuidePageForm(gp.content);
 
-      if (nt && nt.length > 0) {
+      if (Array.isArray(nt)) {
         setNotices(nt);
+        noticesLoadedRef.current = true;
 
         if (initialNoticeIdToEdit) {
           const found = nt.find(n => n.id === initialNoticeIdToEdit);
@@ -316,16 +338,13 @@ export default function AdminCMS({
   // Instant handler for clicking notices tab
   const handleSelectNoticesTab = () => {
     setActiveTab('notices');
-    // Instant fallback if empty
-    if (!notices || notices.length === 0) {
-      const stored = getStoredNotices();
-      if (stored && stored.length > 0) {
-        setNotices(stored);
-      }
+    const stored = getStoredNotices();
+    if (stored) {
+      setNotices(stored);
     }
     // Asynchronously refresh without locking UI
-    fetchNotices().then(latest => {
-      if (latest && latest.length > 0) {
+    fetchNotices(true).then(latest => {
+      if (Array.isArray(latest)) {
         setNotices(latest);
       }
     }).catch(() => {});
@@ -529,12 +548,14 @@ export default function AdminCMS({
       setNotices(updatedList);
       triggerSuccessAlert();
       onRefreshData();
+      showToast(editingNotice ? '공지사항이 성공적으로 수정되었습니다.' : '새 공지사항이 성공적으로 등록되었습니다.', 'success');
     } catch (err: any) {
       console.warn('Notice submit warning:', err);
       const nt = getStoredNotices();
       setNotices(nt);
       triggerSuccessAlert();
       onRefreshData();
+      showToast('공지 저장 중 오류가 발생했습니다: ' + (err?.message || ''), 'error');
     } finally {
       setIsSaving(false);
     }
@@ -569,34 +590,71 @@ export default function AdminCMS({
     setIsCreatingNotice(true);
   };
 
+  const handleDuplicateNotice = (notice: Notice) => {
+    setEditingNotice(null); // Create new instead of updating existing
+    const cat = notice.category || '양성화안내';
+    const standardCats = ['양성화안내', '소식', '건축법령', '자주묻는질문', '보도자료'];
+    const isStd = standardCats.includes(cat);
+
+    const now = new Date();
+    const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    setNoticeForm({
+      title: `${notice.title} (복사본)`,
+      content: notice.content,
+      category: isStd ? cat : '직접입력',
+      published: false, // Save as draft initially
+      isPinned: false,
+      imageUrl: notice.imageUrl || '',
+      createdAtDate: dateStr
+    });
+    setIsCustomCategory(!isStd);
+    setCustomCategory(isStd ? '' : cat);
+    setPreviewNoticeMode(false);
+    setIsCreatingNotice(true);
+    showToast('공지사항 내용이 새 작성 화면으로 복사되었습니다.', 'info');
+  };
+
   const handleToggleNoticePin = async (notice: Notice) => {
     try {
-      const updatedList = await updateNotice(notice.id, { isPinned: !notice.isPinned });
+      const nextPinState = !notice.isPinned;
+      const updatedList = await updateNotice(notice.id, { isPinned: nextPinState });
       setNotices(updatedList);
       triggerSuccessAlert();
       onRefreshData();
+      showToast(nextPinState ? '상단 중요 공지로 고정되었습니다.' : '상단 고정이 해제되었습니다.', 'success');
     } catch (err) {
       console.warn('Toggle notice pin error:', err);
+      showToast('상단 고정 변경 실패', 'error');
     }
   };
 
   const handleToggleNoticePublish = async (notice: Notice) => {
     try {
-      const updatedList = await updateNotice(notice.id, { published: !notice.published });
+      const nextPublishState = !(notice.published !== false);
+      const updatedList = await updateNotice(notice.id, { published: nextPublishState });
       setNotices(updatedList);
       triggerSuccessAlert();
       onRefreshData();
+      showToast(nextPublishState ? '공지사항이 즉시 공개되었습니다.' : '공지사항이 비공개(임시보관)로 전환되었습니다.', 'success');
     } catch (err) {
       console.warn('Toggle notice publish error:', err);
+      showToast('공개 상태 변경 실패', 'error');
     }
   };
 
-  const handleDeleteNoticeClick = async (id: string) => {
-    if (!window.confirm('정말 이 공지사항을 삭제하시겠습니까?')) return;
+  // Open in-app deletion confirmation modal (no window.confirm block)
+  const handleDeleteNoticeClick = (notice: { id: string; title: string }) => {
+    setNoticeToDelete(notice);
+  };
+
+  const handleConfirmDeleteNotice = async () => {
+    if (!noticeToDelete) return;
     setIsSaving(true);
+    const targetId = noticeToDelete.id;
     try {
-      const updatedList = await deleteNotice(id);
-      if (editingNotice?.id === id) {
+      const updatedList = await deleteNotice(targetId);
+      if (editingNotice?.id === targetId) {
         setEditingNotice(null);
         setIsCreatingNotice(false);
         setNoticeForm({
@@ -612,45 +670,73 @@ export default function AdminCMS({
       setNotices(updatedList);
       triggerSuccessAlert();
       onRefreshData();
-      alert('공지사항이 성공적으로 삭제되었습니다.');
+      showToast('공지사항이 안전하게 삭제되었습니다.', 'success');
     } catch (err: any) {
       console.warn('Failed to delete notice:', err);
       const nt = getStoredNotices();
       setNotices(nt);
+      showToast('삭제 중 오류가 발생했습니다: ' + (err?.message || ''), 'error');
     } finally {
       setIsSaving(false);
+      setNoticeToDelete(null);
     }
   };
 
-  const handleResetToDefaultNotices = async () => {
-    if (!window.confirm('모든 공지사항을 초기 기본 공지사항 2종으로 깨끗하게 초기화하시겠습니까?\n\n초기화 후 관리자 대시보드에서 각 공지를 자유롭게 수정하거나 새 공지를 추가하실 수 있습니다.')) return;
+  const handleResetToDefaultNotices = () => {
+    setIsConfirmResetNoticesOpen(true);
+  };
+
+  const handleConfirmResetNotices = async () => {
     setIsSaving(true);
     try {
       const resetList = await resetAllNotices(DEFAULT_NOTICES);
       setNotices(resetList);
       triggerSuccessAlert();
       onRefreshData();
-      alert('공지사항이 기본 안내문 2종으로 깨끗하게 초기화되었습니다.\n[수정] 버튼을 눌러 자유롭게 편집하실 수 있습니다.');
+      showToast('공지사항이 기본 안내문 2종으로 깨끗하게 초기화되었습니다.', 'success');
     } catch (err) {
       console.warn('Reset notices warning:', err);
+      showToast('기본값 초기화 중 오류가 발생했습니다.', 'error');
     } finally {
       setIsSaving(false);
+      setIsConfirmResetNoticesOpen(false);
     }
   };
 
-  const handleClearAllNotices = async () => {
-    if (!window.confirm('모든 공지사항 목록을 완전히 비우시겠습니까?\n\n확인 시 등록된 공지가 모두 비워지며, [새 공지 등록]을 통해 원하는 내용으로 처음부터 자유롭게 작성하실 수 있습니다.')) return;
+  const handleClearAllNotices = () => {
+    setIsConfirmClearNoticesOpen(true);
+  };
+
+  const handleConfirmClearNotices = async () => {
     setIsSaving(true);
     try {
       const emptyList = await clearAllNotices();
       setNotices(emptyList);
+      setIsCreatingNotice(false);
+      setEditingNotice(null);
+      setPreviewNoticeMode(false);
+      setNoticeForm({
+        title: '',
+        content: '',
+        category: '양성화안내',
+        published: true,
+        isPinned: false,
+        imageUrl: '',
+        createdAtDate: ''
+      });
+      setIsCustomCategory(false);
+      setCustomCategory('');
+      setNoticeSearch('');
+      setSelectedCategoryFilter('전체');
       triggerSuccessAlert();
       onRefreshData();
-      alert('공지사항 목록이 모두 비워졌습니다. 이제 [새 공지 등록] 버튼을 눌러 새 공지사항을 등록해 보세요.');
+      showToast('공지사항의 모든 내용이 삭제되고 기능이 초기화되었습니다.', 'success');
     } catch (err) {
       console.warn('Clear notices warning:', err);
+      showToast('초기화 중 오류가 발생했습니다.', 'error');
     } finally {
       setIsSaving(false);
+      setIsConfirmClearNoticesOpen(false);
     }
   };
 
@@ -661,13 +747,13 @@ export default function AdminCMS({
       if (res.success) {
         setGitHubSyncSuccess(true);
         triggerSuccessAlert();
-        alert(`저장 완료!\n\n현재 공지사항(${notices.length}개)이 GitHub 프로젝트 파일(src/data/notices.json, public/notices.json, index.html)에 즉시 영구 저장되었습니다.\n\n이제 AI Studio의 [GitHub로 내보내기] 또는 Git Push 시 최신 공지사항이 그대로 GitHub에 저장되고 배포됩니다.`);
+        showToast(`공지사항(${notices.length}개)이 프로젝트 파일(notices.json, index.html)에 즉시 영구 저장되었습니다.`, 'success');
         setTimeout(() => setGitHubSyncSuccess(false), 4000);
       } else {
-        alert('로컬 및 프로젝트 파일 동기화 처리가 완료되었습니다.');
+        showToast('로컬 및 프로젝트 파일 동기화 처리가 완료되었습니다.', 'info');
       }
     } catch (err: any) {
-      alert('GitHub 파일 동기화 중 오류가 발생했습니다: ' + (err?.message || err));
+      showToast('GitHub 파일 동기화 오류: ' + (err?.message || err), 'error');
     } finally {
       setIsGitHubSyncing(false);
     }
@@ -914,27 +1000,33 @@ ${noscriptArticles}
   };
 
   const handleDeleteMediaClick = async (id: string) => {
-    if (!window.confirm('정말 이 미디어를 삭제하시겠습니까?')) return;
     try {
       await deleteMediaItem(id);
       const md = await fetchMediaItems();
       setMediaItems(md);
       triggerSuccessAlert();
-    } catch (err) {
-      alert('미디어 삭제 실패: ' + err);
+      showToast('미디어가 삭제되었습니다.', 'info');
+    } catch (err: any) {
+      showToast('미디어 삭제 실패: ' + (err?.message || err), 'error');
     }
   };
 
-  // Filter notices for search (pinned items first, memoized for instant response)
+  // Filter notices for search and category (pinned items first, memoized for instant response)
   const filteredNotices = useMemo(() => {
     const q = noticeSearch.trim().toLowerCase();
-    const list = q
-      ? notices.filter(n => 
-          (n.title && n.title.toLowerCase().includes(q)) ||
-          (n.content && n.content.toLowerCase().includes(q)) ||
-          (n.category && n.category.toLowerCase().includes(q))
-        )
-      : notices;
+    let list = notices;
+
+    if (selectedCategoryFilter && selectedCategoryFilter !== '전체') {
+      list = list.filter(n => (n.category || '양성화안내') === selectedCategoryFilter);
+    }
+
+    if (q) {
+      list = list.filter(n => 
+        (n.title && n.title.toLowerCase().includes(q)) ||
+        (n.content && n.content.toLowerCase().includes(q)) ||
+        (n.category && n.category.toLowerCase().includes(q))
+      );
+    }
 
     return [...list].sort((a, b) => {
       if (!!a.isPinned !== !!b.isPinned) {
@@ -944,7 +1036,7 @@ ${noscriptArticles}
       const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return timeB - timeA;
     });
-  }, [notices, noticeSearch]);
+  }, [notices, noticeSearch, selectedCategoryFilter]);
 
   return (
     <div id="admin-cms-panel" className="bg-slate-900 text-slate-100 min-h-screen pt-24 pb-16">
@@ -1667,7 +1759,7 @@ ${noscriptArticles}
                         <button
                           type="button"
                           disabled={isSaving}
-                          onClick={() => handleDeleteNoticeClick(editingNotice.id)}
+                          onClick={() => handleDeleteNoticeClick({ id: editingNotice.id, title: editingNotice.title })}
                           className="px-5 py-3 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white disabled:opacity-50 font-bold rounded-xl text-sm flex items-center space-x-1.5 transition-colors cursor-pointer border border-rose-500/20"
                         >
                           <Trash2 size={15} />
@@ -1714,26 +1806,15 @@ ${noscriptArticles}
                           <span>새 공지 등록</span>
                         </button>
 
-                        {/* Reset to Clean Defaults */}
-                        <button
-                          type="button"
-                          onClick={handleResetToDefaultNotices}
-                          className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
-                          title="기본 공지사항 2종으로 깨끗하게 초기화"
-                        >
-                          <RotateCcw size={14} className="text-amber-400" />
-                          <span>기본값 2종 초기화</span>
-                        </button>
-
-                        {/* Clear All Notices */}
+                        {/* Clear & Reset All Notices */}
                         <button
                           type="button"
                           onClick={handleClearAllNotices}
-                          className="px-3 py-2 bg-slate-900 hover:bg-rose-950/40 text-slate-400 hover:text-rose-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
-                          title="목록을 모두 비우고 처음부터 새로 작성"
+                          className="px-3 py-2 bg-slate-900 hover:bg-rose-950/40 text-slate-300 hover:text-rose-400 text-xs font-semibold rounded-xl flex items-center space-x-1.5 transition-colors cursor-pointer border border-slate-800"
+                          title="모든 공지사항 내용 삭제 및 기능 초기화"
                         >
-                          <FolderMinus size={14} />
-                          <span>목록 전체 비우기</span>
+                          <RotateCcw size={14} className="text-rose-400" />
+                          <span>공지사항 전체 초기화</span>
                         </button>
 
                         {/* GitHub File Sync */}
@@ -1794,18 +1875,49 @@ ${noscriptArticles}
                       </button>
                     </div>
 
-                    {/* Search box */}
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-500">
-                        <Search size={16} />
-                      </span>
-                      <input
-                        type="text"
-                        placeholder="공지 제목, 본문, 카테고리 검색..."
-                        value={noticeSearch}
-                        onChange={(e) => setNoticeSearch(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
-                      />
+                    {/* Search box & Category Filter */}
+                    <div className="space-y-3">
+                      <div className="relative">
+                        <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 pointer-events-none text-slate-500">
+                          <Search size={16} />
+                        </span>
+                        <input
+                          type="text"
+                          placeholder="공지 제목, 본문, 카테고리 검색..."
+                          value={noticeSearch}
+                          onChange={(e) => setNoticeSearch(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2.5 text-sm text-white focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+
+                      {/* Category Filter Chips */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-xs text-slate-400 font-semibold mr-1">분류 필터:</span>
+                        {['전체', '양성화안내', '소식', '건축법령', '자주묻는질문', '보도자료'].map((cat) => {
+                          const count = cat === '전체' 
+                            ? notices.length 
+                            : notices.filter(n => (n.category || '양성화안내') === cat).length;
+                          return (
+                            <button
+                              key={cat}
+                              type="button"
+                              onClick={() => setSelectedCategoryFilter(cat)}
+                              className={`px-2.5 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all flex items-center space-x-1 ${
+                                selectedCategoryFilter === cat
+                                  ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                                  : 'bg-slate-950 text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800'
+                              }`}
+                            >
+                              <span>{cat}</span>
+                              <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                                selectedCategoryFilter === cat ? 'bg-slate-950/20 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'
+                              }`}>
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {/* List of Notices */}
@@ -1822,12 +1934,16 @@ ${noscriptArticles}
                         return (
                           <div 
                             key={notice.id}
-                            className="bg-slate-950/80 p-4 sm:p-5 rounded-2xl border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-slate-700 transition-all shadow-sm"
+                            className="bg-slate-950/80 p-4 sm:p-5 rounded-2xl border border-slate-800/80 flex flex-col md:flex-row md:items-center justify-between gap-4 hover:border-amber-500/30 transition-all shadow-sm group"
                           >
-                            <div className="flex items-start space-x-4 flex-1 min-w-0">
+                            <div 
+                              onClick={() => handleEditNotice(notice)}
+                              className="flex items-start space-x-4 flex-1 min-w-0 cursor-pointer"
+                              title="클릭하여 즉시 내용 수정하기"
+                            >
                               {/* Thumbnail preview */}
                               {notice.imageUrl ? (
-                                <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 shrink-0">
+                                <div className="w-14 h-14 rounded-xl overflow-hidden bg-slate-900 border border-slate-800 shrink-0 group-hover:border-amber-500/40 transition-colors">
                                   <img 
                                     src={notice.imageUrl} 
                                     alt="" 
@@ -1836,7 +1952,7 @@ ${noscriptArticles}
                                   />
                                 </div>
                               ) : (
-                                <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 text-slate-600">
+                                <div className="w-14 h-14 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center shrink-0 text-slate-600 group-hover:text-amber-400 group-hover:border-amber-500/40 transition-colors">
                                   <FileText size={22} />
                                 </div>
                               )}
@@ -1876,7 +1992,7 @@ ${noscriptArticles}
                                   )}
                                 </div>
 
-                                <h4 className="font-bold text-white text-sm sm:text-base line-clamp-1">
+                                <h4 className="font-bold text-white text-sm sm:text-base line-clamp-1 group-hover:text-amber-400 transition-colors">
                                   {notice.title}
                                 </h4>
 
@@ -1918,6 +2034,17 @@ ${noscriptArticles}
                                 <span>{notice.published !== false ? '공개중' : '비공개'}</span>
                               </button>
 
+                              {/* Duplicate Notice */}
+                              <button
+                                type="button"
+                                onClick={() => handleDuplicateNotice(notice)}
+                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 text-xs font-semibold"
+                                title="이 공지사항 복제하여 새로 작성"
+                              >
+                                <CopyPlus size={13} />
+                                <span>복제</span>
+                              </button>
+
                               {/* Edit Button */}
                               <button
                                 type="button"
@@ -1932,7 +2059,7 @@ ${noscriptArticles}
                               {/* Delete Button */}
                               <button
                                 type="button"
-                                onClick={() => handleDeleteNoticeClick(notice.id)}
+                                onClick={() => handleDeleteNoticeClick({ id: notice.id, title: notice.title })}
                                 className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 border border-rose-500/30 rounded-lg transition-colors cursor-pointer flex items-center space-x-1 text-xs font-semibold"
                                 title="공지사항 삭제"
                               >
@@ -1947,21 +2074,16 @@ ${noscriptArticles}
                       {filteredNotices.length === 0 && (
                         <div className="text-center py-12 bg-slate-950/40 rounded-2xl border border-slate-800 space-y-3">
                           <FileText size={32} className="text-slate-600 mx-auto" />
-                          <p className="text-slate-400 text-sm font-medium">작성된 공지사항이 없거나 검색 결과가 비어 있습니다.</p>
+                          <p className="text-slate-300 text-sm font-semibold">등록된 공지사항이 없습니다.</p>
+                          <p className="text-slate-500 text-xs">공지사항의 모든 내용이 삭제 및 초기화되었습니다. [새 공지 작성]으로 첫 공지사항을 등록해 보세요.</p>
                           <div className="flex items-center justify-center gap-2 pt-1">
                             <button
                               type="button"
                               onClick={handleStartCreateNotice}
-                              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs cursor-pointer"
+                              className="px-5 py-2.5 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl text-xs cursor-pointer flex items-center space-x-1.5 shadow"
                             >
-                              새 공지 작성하기
-                            </button>
-                            <button
-                              type="button"
-                              onClick={handleResetToDefaultNotices}
-                              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs cursor-pointer"
-                            >
-                              기본 공지 2종 불러오기
+                              <Plus size={14} />
+                              <span>새 공지 등록하기</span>
                             </button>
                           </div>
                         </div>
@@ -2522,6 +2644,163 @@ ${noscriptArticles}
         </div>
 
       </div>
+
+      {/* In-App Confirmation Modal: Delete Notice */}
+      {noticeToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3 text-rose-400">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
+                <Trash2 size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">공지사항 삭제 확인</h3>
+                <p className="text-xs text-slate-400">삭제 후 복구가 불가능합니다.</p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300">
+              <span className="text-slate-500 block mb-1">삭제 대상 공지:</span>
+              <strong className="text-white text-sm line-clamp-2">{noticeToDelete.title}</strong>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              정말로 이 공지사항을 삭제하시겠습니까? 삭제 즉시 웹사이트 공지사항 목록과 데이터베이스에서 완전히 제거됩니다.
+            </p>
+
+            <div className="flex items-center justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => setNoticeToDelete(null)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={handleConfirmDeleteNotice}
+                className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow flex items-center space-x-1.5"
+              >
+                <Trash2 size={14} />
+                <span>{isSaving ? '삭제 처리 중...' : '네, 삭제합니다'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-App Confirmation Modal: Reset to Defaults */}
+      {isConfirmResetNoticesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3 text-amber-400">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                <RotateCcw size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">기본 공지 2종으로 초기화</h3>
+                <p className="text-xs text-slate-400">초기 상태로 복원합니다.</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              모든 공지사항을 로하스건축사사무소 <strong>초기 기본 안내문 2종</strong>으로 깨끗하게 초기화하시겠습니까?
+              <br /><br />
+              초기화 후 각 공지사항의 [수정] 버튼을 눌러 자유롭게 문구를 변경하거나 새 공지를 추가하실 수 있습니다.
+            </p>
+
+            <div className="flex items-center justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => setIsConfirmResetNoticesOpen(false)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={handleConfirmResetNotices}
+                className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow flex items-center space-x-1.5"
+              >
+                <RotateCcw size={14} />
+                <span>{isSaving ? '초기화 중...' : '기본값으로 초기화'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* In-App Confirmation Modal: Clear & Reset All Notices */}
+      {isConfirmClearNoticesOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3 text-rose-400">
+              <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">공지사항 전체 초기화</h3>
+                <p className="text-xs text-slate-400">모든 공지사항 내용 삭제 및 기능 초기화</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              등록된 모든 공지사항 내용을 완전히 삭제하고, 공지사항의 모든 상태 및 기능을 깨끗한 초기 상태(0건)로 초기화하시겠습니까?
+              <br /><br />
+              확인 시 목록이 0개가 되며, [새 공지 등록]을 통해 원하는 공지만 깔끔하게 처음부터 작성하실 수 있습니다.
+            </p>
+
+            <div className="flex items-center justify-end space-x-2 pt-2">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={() => setIsConfirmClearNoticesOpen(false)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={handleConfirmClearNotices}
+                className="px-4 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow flex items-center space-x-1.5"
+              >
+                <RotateCcw size={14} />
+                <span>{isSaving ? '초기화 중...' : '모두 삭제 및 초기화'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Floating Toast Notification */}
+      {toastNotification && (
+        <div 
+          className={`fixed bottom-6 right-6 z-50 flex items-center space-x-3 px-5 py-3.5 rounded-2xl shadow-2xl border backdrop-blur-md transition-all animate-bounce ${
+            toastNotification.type === 'success'
+              ? 'bg-slate-900/95 border-emerald-500/50 text-emerald-300'
+              : toastNotification.type === 'error'
+              ? 'bg-slate-900/95 border-rose-500/50 text-rose-300'
+              : 'bg-slate-900/95 border-amber-500/50 text-amber-300'
+          }`}
+        >
+          {toastNotification.type === 'success' && <CheckCircle size={18} className="text-emerald-400 shrink-0" />}
+          {toastNotification.type === 'error' && <AlertTriangle size={18} className="text-rose-400 shrink-0" />}
+          {toastNotification.type === 'info' && <FileText size={18} className="text-amber-400 shrink-0" />}
+          <span className="text-xs sm:text-sm font-semibold text-slate-100">{toastNotification.message}</span>
+          <button
+            type="button"
+            onClick={() => setToastNotification(null)}
+            className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors ml-2 cursor-pointer"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
     </div>
   );

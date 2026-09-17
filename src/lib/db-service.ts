@@ -246,17 +246,25 @@ const NOTICES_CACHE_TTL = 30000; // 30 seconds
 
 // Retrieve notices from memory or local storage cache, preserving any user modifications
 export function getStoredNotices(): Notice[] {
-  if (inMemoryNoticesCache && inMemoryNoticesCache.length > 0) {
+  if (inMemoryNoticesCache !== null) {
     return inMemoryNoticesCache;
   }
 
   if (typeof window === 'undefined') return DEFAULT_NOTICES;
+
+  // Migration: force-clean old mock caches if first time on clean reset
+  if (localStorage.getItem('lohas_notices_clean_v2') !== 'true') {
+    localStorage.setItem('lohas_notices_clean_v2', 'true');
+    localStorage.setItem('lohas_cache_notices', JSON.stringify([]));
+    inMemoryNoticesCache = [];
+    return [];
+  }
   
   const cachedJson = localStorage.getItem('lohas_cache_notices');
   if (cachedJson !== null) {
     try {
       const parsed = JSON.parse(cachedJson) as Notice[];
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         const mapped = parsed.map(n => ({
           ...n,
           createdAt: n.createdAt ? new Date(n.createdAt) : new Date(),
@@ -452,24 +460,20 @@ export async function seedDatabaseIfNeeded() {
       }
     }
 
-    // 6. Check Notices Collection (seed only once initially, never overwrite user changes or empty lists)
+    // 6. Check Notices Collection: Ensure clean initialized state with 0 notices
     try {
       const seedInfoSnap = await getDoc(seedInfoRef);
-      const isNoticesAlreadySeeded = seedInfoSnap.exists() && seedInfoSnap.data()?.noticesSeeded === true;
-      if (!isNoticesAlreadySeeded) {
+      const isNoticesAlreadyReset = seedInfoSnap.exists() && seedInfoSnap.data()?.noticesCleanReset === true;
+      if (!isNoticesAlreadyReset) {
         const noticesRef = collection(db, 'notices');
         const noticesSnap = await getDocs(noticesRef);
-        if (noticesSnap.empty) {
-          for (const notice of DEFAULT_NOTICES) {
-            const { id, createdAt, updatedAt, ...cleanNotice } = notice;
-            await setDoc(doc(db, 'notices', id), {
-              ...cleanNotice,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp()
-            });
-          }
+        if (!noticesSnap.empty) {
+          const deletePromises = noticesSnap.docs.map(d => deleteDoc(doc(db, 'notices', d.id)));
+          await Promise.all(deletePromises);
         }
-        await setDoc(seedInfoRef, { noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
+        await setDoc(seedInfoRef, { noticesCleanReset: true, noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
+        saveNoticesToCache([]);
+        syncNoticesToServerAndFiles([]);
       }
     } catch (e) {
       console.warn('Syncing notices in seedDatabaseIfNeeded warning:', e);
@@ -649,7 +653,7 @@ export async function fetchNotices(forceFresh = false): Promise<Notice[]> {
   const localList = getStoredNotices();
 
   // If memory cache is fresh (< 30s) and not forced, return immediately for sub-millisecond response
-  if (!forceFresh && inMemoryNoticesCache && inMemoryNoticesCache.length > 0 && (Date.now() - lastNoticesFetchTime < NOTICES_CACHE_TTL)) {
+  if (!forceFresh && inMemoryNoticesCache !== null && (Date.now() - lastNoticesFetchTime < NOTICES_CACHE_TTL)) {
     return inMemoryNoticesCache;
   }
 
@@ -667,49 +671,57 @@ export async function fetchNotices(forceFresh = false): Promise<Notice[]> {
     })();
 
     const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error('Firestore timeout')), 2000)
+      setTimeout(() => reject(new Error('Firestore timeout')), 3000)
     );
 
     const snap = await Promise.race([fetchDocsPromise, timeoutPromise]);
 
-    if (snap && !snap.empty) {
-      const list: Notice[] = [];
-      snap.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.category === '성공사례') return; // Exclude '성공사례' items
+    if (snap) {
+      if (!snap.empty) {
+        const list: Notice[] = [];
+        snap.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.category === '성공사례') return; // Exclude '성공사례' items
 
-        let createdDate = new Date();
-        if (data.createdAt?.toDate) {
-          createdDate = data.createdAt.toDate();
-        } else if (data.createdAt) {
-          createdDate = new Date(data.createdAt);
+          let createdDate = new Date();
+          if (data.createdAt?.toDate) {
+            createdDate = data.createdAt.toDate();
+          } else if (data.createdAt) {
+            createdDate = new Date(data.createdAt);
+          }
+
+          let updatedDate = new Date();
+          if (data.updatedAt?.toDate) {
+            updatedDate = data.updatedAt.toDate();
+          } else if (data.updatedAt) {
+            updatedDate = new Date(data.updatedAt);
+          }
+
+          list.push({
+            id: docSnap.id,
+            ...data,
+            createdAt: createdDate,
+            updatedAt: updatedDate
+          } as Notice);
+        });
+
+        // In-memory sort: pinned items first, then by createdAt desc
+        list.sort((a, b) => {
+          if (!!a.isPinned !== !!b.isPinned) {
+            return a.isPinned ? -1 : 1;
+          }
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        });
+
+        saveNoticesToCache(list);
+        return list;
+      } else {
+        const isSeeded = localStorage.getItem('lohas_db_seeded') === 'true';
+        if (isSeeded) {
+          saveNoticesToCache([]);
+          return [];
         }
-
-        let updatedDate = new Date();
-        if (data.updatedAt?.toDate) {
-          updatedDate = data.updatedAt.toDate();
-        } else if (data.updatedAt) {
-          updatedDate = new Date(data.updatedAt);
-        }
-
-        list.push({
-          id: docSnap.id,
-          ...data,
-          createdAt: createdDate,
-          updatedAt: updatedDate
-        } as Notice);
-      });
-
-      // In-memory sort: pinned items first, then by createdAt desc
-      list.sort((a, b) => {
-        if (!!a.isPinned !== !!b.isPinned) {
-          return a.isPinned ? -1 : 1;
-        }
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      });
-
-      saveNoticesToCache(list);
-      return list;
+      }
     }
   } catch (error) {
     // On timeout or error, instant fallback to cached notices
@@ -836,8 +848,8 @@ export async function deleteNotice(id: string): Promise<Notice[]> {
   return updatedList;
 }
 
-// Full reset of notices to standard clean defaults
-export async function resetAllNotices(customList: Notice[] = DEFAULT_NOTICES): Promise<Notice[]> {
+// Full reset of notices to clean empty state or custom list
+export async function resetAllNotices(customList: Notice[] = []): Promise<Notice[]> {
   const cleanList = customList.map(n => ({
     ...n,
     createdAt: n.createdAt ? new Date(n.createdAt) : new Date(),
@@ -863,8 +875,9 @@ export async function resetAllNotices(customList: Notice[] = DEFAULT_NOTICES): P
     }
 
     const seedInfoRef = doc(db, 'system', 'seedInfo');
-    await setDoc(seedInfoRef, { noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(seedInfoRef, { noticesCleanReset: true, noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
     localStorage.setItem('lohas_db_seeded', 'true');
+    localStorage.setItem('lohas_notices_clean_v2', 'true');
   } catch (err) {
     console.warn('Firestore resetAllNotices warning:', err);
   }
@@ -885,8 +898,9 @@ export async function clearAllNotices(): Promise<Notice[]> {
     await Promise.all(deletePromises);
 
     const seedInfoRef = doc(db, 'system', 'seedInfo');
-    await setDoc(seedInfoRef, { noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
+    await setDoc(seedInfoRef, { noticesCleanReset: true, noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
     localStorage.setItem('lohas_db_seeded', 'true');
+    localStorage.setItem('lohas_notices_clean_v2', 'true');
   } catch (err) {
     console.warn('Firestore clearAllNotices warning:', err);
   }
