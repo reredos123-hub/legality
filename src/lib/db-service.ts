@@ -246,36 +246,48 @@ const NOTICES_CACHE_TTL = 30000; // 30 seconds
 
 // Retrieve notices from memory or local storage cache, preserving any user modifications
 export function getStoredNotices(): Notice[] {
-  if (inMemoryNoticesCache !== null) {
+  if (inMemoryNoticesCache !== null && inMemoryNoticesCache.length > 0) {
     return inMemoryNoticesCache;
   }
 
   if (typeof window === 'undefined') return DEFAULT_NOTICES;
 
-  // Migration: force-clean old mock caches if first time on clean reset
-  if (localStorage.getItem('lohas_notices_clean_v2') !== 'true') {
-    localStorage.setItem('lohas_notices_clean_v2', 'true');
-    localStorage.setItem('lohas_cache_notices', JSON.stringify([]));
-    inMemoryNoticesCache = [];
-    return [];
-  }
-  
+  const currentVersion = computeNoticesVersion(DEFAULT_NOTICES);
+  const storedVersion = localStorage.getItem('lohas_notices_version');
+
+  // Check cached notices in localStorage
   const cachedJson = localStorage.getItem('lohas_cache_notices');
+  let cachedList: Notice[] | null = null;
   if (cachedJson !== null) {
     try {
       const parsed = JSON.parse(cachedJson) as Notice[];
-      if (Array.isArray(parsed)) {
-        const mapped = parsed.map(n => ({
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        cachedList = parsed.map(n => ({
           ...n,
           createdAt: n.createdAt ? new Date(n.createdAt) : new Date(),
           updatedAt: n.updatedAt ? new Date(n.updatedAt) : new Date()
         }));
-        inMemoryNoticesCache = mapped;
-        return mapped;
       }
     } catch (e) {
       console.warn('Failed to parse cached notices:', e);
     }
+  }
+
+  // If the version of DEFAULT_NOTICES changed or cached list is empty while DEFAULT_NOTICES has items:
+  if (storedVersion !== currentVersion || (!cachedList || cachedList.length === 0)) {
+    if (DEFAULT_NOTICES && DEFAULT_NOTICES.length > 0) {
+      try {
+        localStorage.setItem('lohas_notices_version', currentVersion);
+        localStorage.setItem('lohas_cache_notices', JSON.stringify(DEFAULT_NOTICES));
+      } catch {}
+      inMemoryNoticesCache = DEFAULT_NOTICES;
+      return DEFAULT_NOTICES;
+    }
+  }
+
+  if (cachedList && cachedList.length > 0) {
+    inMemoryNoticesCache = cachedList;
+    return cachedList;
   }
 
   const htmlNotices = getNoticesFromHtmlDocument();
@@ -286,6 +298,7 @@ export function getStoredNotices(): Notice[] {
   // If no cache exists, initialize with HTML or DEFAULT_NOTICES
   try {
     localStorage.setItem('lohas_cache_notices', JSON.stringify(initialList));
+    localStorage.setItem('lohas_notices_version', currentVersion);
   } catch {}
   return initialList;
 }
@@ -460,20 +473,27 @@ export async function seedDatabaseIfNeeded() {
       }
     }
 
-    // 6. Check Notices Collection: Ensure clean initialized state with 0 notices
+    // 6. Check Notices Collection: Ensure initialized with current notices
     try {
-      const seedInfoSnap = await getDoc(seedInfoRef);
-      const isNoticesAlreadyReset = seedInfoSnap.exists() && seedInfoSnap.data()?.noticesCleanReset === true;
-      if (!isNoticesAlreadyReset) {
-        const noticesRef = collection(db, 'notices');
-        const noticesSnap = await getDocs(noticesRef);
-        if (!noticesSnap.empty) {
-          const deletePromises = noticesSnap.docs.map(d => deleteDoc(doc(db, 'notices', d.id)));
-          await Promise.all(deletePromises);
-        }
-        await setDoc(seedInfoRef, { noticesCleanReset: true, noticesSeeded: true, updatedAt: serverTimestamp() }, { merge: true });
-        saveNoticesToCache([]);
-        syncNoticesToServerAndFiles([]);
+      const noticesRef = collection(db, 'notices');
+      const noticesSnap = await getDocs(noticesRef);
+      if (noticesSnap.empty && DEFAULT_NOTICES.length > 0) {
+        const seedPromises = DEFAULT_NOTICES.map(n => {
+          const docRef = doc(db, 'notices', n.id);
+          return setDoc(docRef, {
+            title: n.title,
+            content: n.content,
+            category: n.category,
+            published: n.published,
+            isPinned: n.isPinned,
+            imageUrl: n.imageUrl || '',
+            createdAt: new Date(n.createdAt),
+            updatedAt: new Date(n.updatedAt)
+          });
+        });
+        await Promise.all(seedPromises);
+        saveNoticesToCache(DEFAULT_NOTICES);
+        await syncNoticesToServerAndFiles(DEFAULT_NOTICES);
       }
     } catch (e) {
       console.warn('Syncing notices in seedDatabaseIfNeeded warning:', e);
@@ -705,22 +725,43 @@ export async function fetchNotices(forceFresh = false): Promise<Notice[]> {
           } as Notice);
         });
 
-        // In-memory sort: pinned items first, then by createdAt desc
+        // In-memory sort: pinned items first, then by createdAt desc, then by id desc
         list.sort((a, b) => {
           if (!!a.isPinned !== !!b.isPinned) {
             return a.isPinned ? -1 : 1;
           }
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          const diff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          if (diff !== 0) return diff;
+          return String(b.id).localeCompare(String(a.id));
         });
 
         saveNoticesToCache(list);
         return list;
       } else {
-        const isSeeded = localStorage.getItem('lohas_db_seeded') === 'true';
-        if (isSeeded) {
-          saveNoticesToCache([]);
-          return [];
+        if (DEFAULT_NOTICES.length > 0) {
+          try {
+            const batchPromises = DEFAULT_NOTICES.map(n => {
+              const docRef = doc(db, 'notices', n.id);
+              return setDoc(docRef, {
+                title: n.title,
+                content: n.content,
+                category: n.category,
+                published: n.published,
+                isPinned: n.isPinned,
+                imageUrl: n.imageUrl || '',
+                createdAt: new Date(n.createdAt),
+                updatedAt: new Date(n.updatedAt)
+              });
+            });
+            await Promise.all(batchPromises);
+          } catch (e) {
+            console.warn('Syncing default notices to Firestore warning:', e);
+          }
+          saveNoticesToCache(DEFAULT_NOTICES);
+          return DEFAULT_NOTICES;
         }
+        saveNoticesToCache([]);
+        return [];
       }
     }
   } catch (error) {
